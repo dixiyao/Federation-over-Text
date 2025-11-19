@@ -132,14 +132,14 @@ class ChainOfThoughtReader:
                 full_prompt,
                 return_tensors="pt",
                 truncation=True,
-                max_length=4096,  # Adjust based on model context length
+                max_length=4096, 
             ).to(self.device)
             
             # Generate response
             with torch.no_grad():
                 outputs = self.model.generate(
                     **inputs,
-                    max_new_tokens=2048,  # Adjust based on needs
+                    max_new_tokens=2048,  
                     temperature=0.7,
                     do_sample=True,
                     top_p=0.9,
