@@ -43,6 +43,8 @@ class OpenReviewScraper:
         papers = []
         try:
             response = self.session.get(api_url, params=params, timeout=30)
+            response.raise_for_status()
+            
             if response.status_code == 200:
                 data = response.json()
                 notes = data.get("notes", [])
@@ -50,14 +52,19 @@ class OpenReviewScraper:
                 # Filter for notable top 5% papers
                 for note in notes:
                     # Check if paper is in notable top 5%
-                    # This might need adjustment based on actual API response structure
+                    # The venue information might be in different places
+                    content = note.get("content", {})
+                    venue = content.get("venue", "")
+                    
+                    # Check various possible venue formats
                     if (
-                        note.get("content", {}).get("venue")
-                        == "ICLR 2023 Notable Top 5%"
+                        venue == "ICLR 2023 Notable Top 5%"
+                        or "Notable Top 5%" in venue
+                        or "Notable" in venue and "Top 5%" in venue
                     ):
                         papers.append(note)
                     # Alternative: check for specific tags or fields
-                    elif "notable" in str(note.get("content", {})).lower():
+                    elif "notable" in str(content).lower() and "top" in str(content).lower():
                         papers.append(note)
 
                 # If no notable papers found, get all and filter by acceptance
@@ -65,7 +72,7 @@ class OpenReviewScraper:
                     print(
                         "No notable papers found via API, trying alternative method..."
                     )
-                    # Get all accepted papers
+                    # Get all accepted papers and check venue field
                     for note in notes:
                         content = note.get("content", {})
                         venue = content.get("venue", "")
@@ -73,8 +80,14 @@ class OpenReviewScraper:
                             "Notable" in venue or "Top 5%" in venue
                         ):
                             papers.append(note)
-        except Exception as e:
+                            
+                print(f"Found {len(papers)} notable papers via API")
+        except requests.exceptions.RequestException as e:
             print(f"API method failed: {e}")
+            print("Trying web scraping method...")
+            papers = self._scrape_web_page()
+        except Exception as e:
+            print(f"Unexpected error in API call: {e}")
             print("Trying web scraping method...")
             papers = self._scrape_web_page()
 
@@ -114,7 +127,13 @@ class OpenReviewScraper:
 
     def download_paper(self, paper_info):
         """Download a paper PDF given paper information"""
-        paper_id = paper_info.get("id") or paper_info.get("number")
+        # Try to get paper ID from various possible fields
+        # The forum ID is what's used in OpenReview URLs
+        paper_id = paper_info.get("forum") or paper_info.get("id") or paper_info.get("number")
+        if not paper_id:
+            print(f"Error: No paper ID found for paper: {paper_info.get('title', 'Unknown')}")
+            return None
+            
         title = paper_info.get("content", {}).get(
             "title", paper_info.get("title", f"paper_{paper_id}")
         )
@@ -123,28 +142,41 @@ class OpenReviewScraper:
         safe_title = re.sub(r"[^\w\s-]", "", title)[:100]
         safe_title = re.sub(r"[-\s]+", "-", safe_title)
 
-        # Try to get PDF URL
-        pdf_url = None
-        if "pdf" in paper_info.get("content", {}):
-            pdf_url = paper_info["content"]["pdf"]
-        else:
-            # Construct PDF URL
-            pdf_url = f"https://openreview.net/pdf?id={paper_id}"
+        # Use the standard OpenReview PDF URL format: https://openreview.net/pdf?id={paper_id}
+        # This is the most reliable method as shown in the example: https://openreview.net/pdf?id=4-k7kUavAj
+        pdf_url = f"https://openreview.net/pdf?id={paper_id}"
 
         # Download PDF
         pdf_path = os.path.join(self.output_dir, f"{safe_title}_{paper_id}.pdf")
 
         try:
             response = self.session.get(pdf_url, timeout=60, stream=True)
-            if response.status_code == 200:
-                with open(pdf_path, "wb") as f:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        f.write(chunk)
+            response.raise_for_status()
+            
+            # Check if response is actually a PDF
+            content_type = response.headers.get("content-type", "")
+            if "pdf" not in content_type.lower() and not content_type.startswith("application/octet-stream"):
+                # Try alternative: check if we got HTML (error page) instead of PDF
+                if response.headers.get("content-type", "").startswith("text/html"):
+                    print(f"Warning: Received HTML instead of PDF for {title}. The paper might not be publicly available.")
+                    return None
+            
+            with open(pdf_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            
+            # Verify file was written and has content
+            if os.path.getsize(pdf_path) > 0:
                 print(f"Downloaded: {title}")
                 return pdf_path
             else:
-                print(f"Failed to download {title}: HTTP {response.status_code}")
+                print(f"Error: Downloaded file is empty for {title}")
+                os.remove(pdf_path)
                 return None
+                
+        except requests.exceptions.HTTPError as e:
+            print(f"Failed to download {title}: HTTP {e.response.status_code} - {e}")
+            return None
         except Exception as e:
             print(f"Error downloading {title}: {e}")
             return None

@@ -1,6 +1,8 @@
 """
-Chain-of-Thought Paper Reader Client
-Uses a language model (e.g., Deepseek-r1) to read papers with multi-step reasoning.
+Behavior Curation Pipeline Client
+Implements metacognitive reuse for LLM reasoning based on:
+"Metacognitive Reuse: Turning Recurring LLM Reasoning Into Concise Behaviors"
+Uses a three-stage pipeline: Solution → Reflection → Behavior Extraction
 """
 
 import argparse
@@ -9,7 +11,7 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 import PyPDF2
 import torch
@@ -18,8 +20,9 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 class ChainOfThoughtReader:
     """
-    A client that reads papers using chain-of-thought reasoning with multiple steps.
-    Similar to how modern AI assistants (like Cursor) break down complex tasks.
+    A client that reads papers using behavior curation pipeline based on 
+    "Metacognitive Reuse: Turning Recurring LLM Reasoning Into Concise Behaviors"
+    Implements three-stage pipeline: Solution → Reflection → Behavior Extraction
     """
 
     def __init__(
@@ -35,7 +38,7 @@ class ChainOfThoughtReader:
             task
             or "Analyze this paper and identify key contributions, limitations, and potential future research directions."
         )
-        self.generated_prompts = {}  # Store prompts generated in Step 0
+        self.behavior_book = {}  # Store extracted behaviors
         
         # Model and tokenizer will be loaded lazily on first use
         self.model = None
@@ -158,90 +161,79 @@ class ChainOfThoughtReader:
             print(f"Error calling model: {e}")
             return f"[Error] Model generation failed: {str(e)}"
 
-    def _step_0_generate_prompts(self, title: str, paper_excerpt: str) -> Dict:
-        """Step 0: Generate prompts for all subsequent steps"""
-        # Minimal prompt - just the essential information
-        prompt = f"""Paper Title: {title}
-                     Paper Excerpt: {paper_excerpt[:2000]}
-                     Task/Question: {self.task}
+    def _get_solution_prompt(self, problem: str) -> str:
+        """Get the Solution Prompt as defined in the paper"""
+        prompt = f"""Please reason step by step and put the final answer in <answer_box>.
 
-                     Generate 4 prompts for a 4-step paper analysis process. Return JSON format:
-                     {{
-                        "step1_prompt": "...",
-                        "step2_prompt": "...",
-                        "step3_prompt": "...",
-                        "step4_prompt": "..."
-                     }}
-                """
+Problem: {problem}"""
+        return prompt
 
-        system_prompt = None  # No predefined system prompt
+    def _get_reflection_prompt(self, problem: str, solution: str) -> str:
+        """Get the Reflection Prompt as defined in the paper"""
+        prompt = f"""
+Problem: {problem}
 
-        response = self._call_model(prompt, system_prompt)
+Solution: {solution}
+        
+Here is the definition of a behavior:
+- A note or skill to keep in mind while solving math problems.
+- A strategy, a trick, or a technique.
+- A general rule or a common sense principle.
+- Not a solution to the problem, but it can be used to solve the problem.
 
-        # Try to parse JSON from response
-        try:
-            # Try to extract JSON from the response
-            json_match = re.search(r"\{.*\}", response, re.DOTALL)
-            if json_match:
-                prompts_dict = json.loads(json_match.group())
-                self.generated_prompts = prompts_dict
-            else:
-                # If JSON parsing fails, store the raw response and try to extract prompts manually
-                print(
-                    "Warning: Could not parse JSON from Step 0 response. Using raw response."
-                )
-                self.generated_prompts = {
-                    "step1_prompt": response,
-                    "step2_prompt": response,
-                    "step3_prompt": response,
-                    "step4_prompt": response,
-                }
-        except Exception as e:
-            print(
-                f"Warning: Error parsing prompts from Step 0: {e}. Using raw response."
-            )
-            self.generated_prompts = {
-                "step1_prompt": response,
-                "step2_prompt": response,
-                "step3_prompt": response,
-                "step4_prompt": response,
-            }
+For example - if the problem is "Find the area of a circle with radius 4", one useful behaviour could be:
+{{"behavior_area_of_circle": "area of a circle is pi*r^2"}}
 
-        step_result = {
-            "step": 0,
-            "name": "Generate Prompts for All Steps",
-            "prompt": prompt,
-            "response": response,
-            "generated_prompts": self.generated_prompts,
-            "timestamp": time.time(),
-        }
+Given a problem and the corresponding solution, reflect and critique the solutions along the following dimensions:
 
-        self.reasoning_steps.append(step_result)
-        return step_result
+1. Correctness Analysis:
+   - Is the solution mathematically correct?
+   - Are there any calculation errors?
+   - Is the reasoning logically sound?
+   - Are all steps properly justified?
+   - What mistakes, if any, were made?
 
-    def _step_1_summary_and_plan(self, paper_text: str, title: str) -> Dict:
-        """Step 1: Summarize paper, extract learnings, identify limitations and future work, generate plan"""
-        # Get the generated prompt from Step 0
-        step1_prompt_template = self.generated_prompts.get("step1_prompt", "")
+2. Missing Behaviors Analysis:
+   - What behaviors should have been used but weren't?
+   - Remember: a behavior is a note or instruction for quickly using concepts without deriving them from scratch.
+   - For each missing behavior, explain:
+     * How would it have reduced the length of the answer?
+     * How would it have prevented errors?
+     * Why is it crucial for similar problems?
+     * How would it have made the solution more elegant (even if correct)?
 
-        # Replace placeholders in the prompt with actual values
-        prompt = step1_prompt_template.replace("{title}", title)
-        prompt = prompt.replace("{paper_text}", paper_text)
-        prompt = prompt.replace("{paper_content}", paper_text)
-        prompt = prompt.replace("{task}", self.task)
-        prompt = prompt.replace("{question}", self.task)
+3. New Behavior Suggestions:
+   - Suggest specific new behaviors for similar problems.
+   - For each new behavior:
+     * The name must start with 'behavior_'
+     * Provide clear and actionable instructions
+     * Include examples where helpful
+     * Make sure it's general enough for similar problems
+     * Explain why this behavior is valuable
+"""
+        return prompt
 
-        # If no prompt was generated, use a minimal fallback
-        if not step1_prompt_template:
-            prompt = f"Title: {title}\n\nPaper Content: {paper_text}\n\nTask: {self.task}\n\nAnalyze this paper."
+    def _get_behavior_prompt(self, problem: str, solution: str, reflection: str) -> str:
+        """Get the Behavior Prompt as defined in the paper"""
+        prompt = f"""Problem: {problem}
 
-        system_prompt = None  # No predefined system prompt
+Solution: {solution}
 
+Reflection: {reflection}
+
+Now, given this reflection generate a list of behaviors and corresponding instructions/explanations in json format. Each behavior should be a single line, and the format is "behavior_[name]: [description]". The list should be in json format, and each behavior should be a key-value pair, where the key is the behavior name and the value is the description."""
+        return prompt
+
+    def _step_solution(self, problem: str) -> Dict:
+        """Step 1: Generate solution using Solution Prompt"""
+        prompt = self._get_solution_prompt(problem)
+        
+        system_prompt = None
         response = self._call_model(prompt, system_prompt)
 
         step_result = {
             "step": 1,
-            "name": "Summary, Learning, Limitations, Future Work, and Plan Generation",
+            "name": "Solution Generation",
             "prompt": prompt,
             "response": response,
             "timestamp": time.time(),
@@ -250,35 +242,16 @@ class ChainOfThoughtReader:
         self.reasoning_steps.append(step_result)
         return step_result
 
-    def _step_2_find_relevant_content(
-        self, paper_text: str, step1_result: Dict
-    ) -> Dict:
-        """Step 2: Find content that can help and support answering the question"""
-        # Get the generated prompt from Step 0
-        step2_prompt_template = self.generated_prompts.get("step2_prompt", "")
-
-        # Replace placeholders in the prompt with actual values
-        prompt = step2_prompt_template.replace(
-            "{title}", step1_result.get("paper_title", "")
-        )
-        prompt = prompt.replace("{paper_text}", paper_text)
-        prompt = prompt.replace("{paper_content}", paper_text)
-        prompt = prompt.replace("{task}", self.task)
-        prompt = prompt.replace("{question}", self.task)
-        prompt = prompt.replace("{step1_result}", step1_result["response"])
-        prompt = prompt.replace("{step1_analysis}", step1_result["response"])
-
-        # If no prompt was generated, use a minimal fallback
-        if not step2_prompt_template:
-            prompt = f"Task: {self.task}\n\nStep 1 Analysis: {step1_result['response']}\n\nPaper Content: {paper_text}\n\nFind relevant content."
-
-        system_prompt = None  # No predefined system prompt
-
+    def _step_reflection(self, problem: str, solution: str) -> Dict:
+        """Step 2: Generate reflection using Reflection Prompt"""
+        prompt = self._get_reflection_prompt(problem, solution)
+        
+        system_prompt = None
         response = self._call_model(prompt, system_prompt)
 
         step_result = {
             "step": 2,
-            "name": "Find Relevant Content and Evidence",
+            "name": "Reflection and Critique",
             "prompt": prompt,
             "response": response,
             "timestamp": time.time(),
@@ -287,104 +260,40 @@ class ChainOfThoughtReader:
         self.reasoning_steps.append(step_result)
         return step_result
 
-    def _step_3_find_answer(self, paper_text: str, previous_steps: List[Dict]) -> Dict:
-        """Step 3: Follow the plan and evidence from step 2 to find the answer"""
-        # Get the generated prompt from Step 0
-        step3_prompt_template = self.generated_prompts.get("step3_prompt", "")
-
-        # Build previous steps context
-        previous_steps_context = chr(10).join(
-            [
-                f"=== Step {s['step']}: {s['name']} ==={chr(10)}{s['response']}{chr(10)}"
-                for s in previous_steps
-            ]
-        )
-
-        # Replace placeholders in the prompt with actual values
-        prompt = step3_prompt_template.replace(
-            "{title}",
-            previous_steps[0].get("paper_title", "") if previous_steps else "",
-        )
-        prompt = prompt.replace("{paper_text}", paper_text)
-        prompt = prompt.replace("{paper_content}", paper_text)
-        prompt = prompt.replace("{task}", self.task)
-        prompt = prompt.replace("{question}", self.task)
-        prompt = prompt.replace("{previous_steps}", previous_steps_context)
-        prompt = prompt.replace(
-            "{step1_result}", previous_steps[0]["response"] if previous_steps else ""
-        )
-        prompt = prompt.replace(
-            "{step2_result}",
-            previous_steps[1]["response"] if len(previous_steps) > 1 else "",
-        )
-
-        # If no prompt was generated, use a minimal fallback
-        if not step3_prompt_template:
-            prompt = f"Task: {self.task}\n\nPrevious Steps:\n{previous_steps_context}\n\nPaper Content: {paper_text}\n\nFind the answer."
-
-        system_prompt = None  # No predefined system prompt
-
+    def _step_behavior_extraction(self, problem: str, solution: str, reflection: str) -> Dict:
+        """Step 3: Extract behaviors using Behavior Prompt"""
+        prompt = self._get_behavior_prompt(problem, solution, reflection)
+        
+        system_prompt = None
         response = self._call_model(prompt, system_prompt)
+
+        # Try to parse behaviors from JSON response
+        behaviors = {}
+        try:
+            # Try to extract JSON from the response
+            json_match = re.search(r"\{.*\}", response, re.DOTALL)
+            if json_match:
+                behaviors = json.loads(json_match.group())
+                # Update behavior book
+                self.behavior_book.update(behaviors)
+            else:
+                print("Warning: Could not parse JSON from behavior extraction. Attempting manual extraction.")
+                # Try to extract behaviors manually (look for behavior_* patterns)
+                behavior_pattern = r'["\']?(behavior_\w+)["\']?\s*[:=]\s*["\']?([^"\']+)["\']?'
+                matches = re.findall(behavior_pattern, response)
+                for name, desc in matches:
+                    behaviors[name] = desc.strip()
+                self.behavior_book.update(behaviors)
+        except Exception as e:
+            print(f"Warning: Error parsing behaviors: {e}. Storing raw response.")
+            behaviors = {"raw_response": response}
 
         step_result = {
             "step": 3,
-            "name": "Find Answer Using Plan and Evidence",
+            "name": "Behavior Extraction",
             "prompt": prompt,
             "response": response,
-            "timestamp": time.time(),
-        }
-
-        self.reasoning_steps.append(step_result)
-        return step_result
-
-    def _step_4_polish_and_novelty(
-        self, paper_text: str, all_steps: List[Dict]
-    ) -> Dict:
-        """Step 4: Polish the answer and think of novelty"""
-        # Get the generated prompt from Step 0
-        step4_prompt_template = self.generated_prompts.get("step4_prompt", "")
-
-        # Build all steps context
-        all_steps_context = chr(10).join(
-            [
-                f"=== Step {s['step']}: {s['name']} ==={chr(10)}{s['response']}{chr(10)}"
-                for s in all_steps
-            ]
-        )
-
-        # Replace placeholders in the prompt with actual values
-        prompt = step4_prompt_template.replace(
-            "{title}", all_steps[0].get("paper_title", "") if all_steps else ""
-        )
-        prompt = prompt.replace("{paper_text}", paper_text)
-        prompt = prompt.replace("{paper_content}", paper_text)
-        prompt = prompt.replace("{task}", self.task)
-        prompt = prompt.replace("{question}", self.task)
-        prompt = prompt.replace("{all_steps}", all_steps_context)
-        prompt = prompt.replace("{complete_reasoning}", all_steps_context)
-        prompt = prompt.replace(
-            "{step1_result}", all_steps[0]["response"] if all_steps else ""
-        )
-        prompt = prompt.replace(
-            "{step2_result}", all_steps[1]["response"] if len(all_steps) > 1 else ""
-        )
-        prompt = prompt.replace(
-            "{step3_result}", all_steps[2]["response"] if len(all_steps) > 2 else ""
-        )
-
-        # If no prompt was generated, use a minimal fallback
-        if not step4_prompt_template:
-            prompt = f"Task: {self.task}\n\nComplete Reasoning:\n{all_steps_context}\n\nPaper Content: {paper_text}\n\nPolish answer and identify novelty."
-
-        system_prompt = None  # No predefined system prompt
-
-        response = self._call_model(prompt, system_prompt)
-
-        step_result = {
-            "step": 4,
-            "name": "Polish Answer and Identify Novelty",
-            "prompt": prompt,
-            "response": response,
+            "behaviors": behaviors,
             "timestamp": time.time(),
         }
 
@@ -392,87 +301,57 @@ class ChainOfThoughtReader:
         return step_result
 
     def read_paper(
-        self, paper_path: Optional[str] = None, task: Optional[str] = None
+        self, task: Optional[str] = None
     ) -> Dict:
         """
-        Main method to read a paper with chain-of-thought reasoning.
+        Main method to process a question/problem using behavior curation pipeline.
+        Implements the three-stage pipeline: Solution → Reflection → Behavior Extraction
 
         Args:
-            paper_path: Path to the paper PDF. If None, reads the first paper found.
-            task: Optional task/question to guide the analysis. If None, uses the default task.
+            task: Optional task/question/problem to solve. If None, uses the default task.
 
         Returns:
-            Dictionary containing all reasoning steps and final analysis.
+            Dictionary containing all reasoning steps, behaviors, and behavior book.
         """
         # Update task if provided
         if task is not None:
             self.task = task
 
-        # Find a paper to read
-        if paper_path is None:
-            papers_dir = Path(self.papers_dir)
-            pdf_files = list(papers_dir.glob("*.pdf"))
-            if not pdf_files:
-                raise FileNotFoundError(f"No PDF files found in {self.papers_dir}")
-            paper_path = str(pdf_files[0])
-            print(f"Reading paper: {paper_path}")
+        # The task/question is treated as the problem to solve
+        problem = self.task
 
-        # Extract text from PDF
-        print("Extracting text from PDF...")
-        paper_text = self._extract_text_from_pdf(paper_path)
-        if not paper_text:
-            raise ValueError("Failed to extract text from PDF")
+        print(f"Problem/Question: {problem}\n")
 
-        # Get paper title (from filename or extract from text)
-        paper_title = Path(paper_path).stem
-        if "Title:" in paper_text[:500]:
-            title_line = [
-                line for line in paper_text[:500].split("\n") if "Title:" in line
-            ]
-            if title_line:
-                paper_title = title_line[0].replace("Title:", "").strip()
-
-        print(f"Paper: {paper_title}")
-        print(f"Task/Question: {self.task}")
-        print(f"Text length: {len(paper_text)} characters\n")
-
-        # Reset reasoning steps and generated prompts
+        # Reset reasoning steps and behavior book
         self.reasoning_steps = []
-        self.generated_prompts = {}
+        self.behavior_book = {}
 
-        # Step 0: Generate prompts for all subsequent steps
-        print("Step 0: Generating prompts for all steps...")
-        step0 = self._step_0_generate_prompts(paper_title, paper_text)
+        # Step 1: Solution Generation
+        print("Step 1: Generating solution...")
+        step1 = self._step_solution(problem)
+        solution = step1["response"]
         time.sleep(1)  # Rate limiting
 
-        # Step 1: Summary, Learning, Limitations, Future Work, and Plan
-        print(
-            "Step 1: Summary, Learning, Limitations, Future Work, and Plan Generation..."
-        )
-        step1 = self._step_1_summary_and_plan(paper_text, paper_title)
+        # Step 2: Reflection
+        print("Step 2: Generating reflection and critique...")
+        step2 = self._step_reflection(problem, solution)
+        reflection = step2["response"]
         time.sleep(1)  # Rate limiting
 
-        # Step 2: Find Relevant Content
-        print("Step 2: Finding Relevant Content and Evidence...")
-        step2 = self._step_2_find_relevant_content(paper_text, step1)
+        # Step 3: Behavior Extraction
+        print("Step 3: Extracting behaviors...")
+        step3 = self._step_behavior_extraction(problem, solution, reflection)
         time.sleep(1)
-
-        # Step 3: Find Answer
-        print("Step 3: Finding Answer Using Plan and Evidence...")
-        step3 = self._step_3_find_answer(paper_text, [step1, step2])
-        time.sleep(1)
-
-        # Step 4: Polish and Novelty
-        print("Step 4: Polishing Answer and Identifying Novelty...")
-        self._step_4_polish_and_novelty(paper_text, [step0, step1, step2, step3])
 
         # Compile results
         result = {
-            "paper_path": paper_path,
-            "paper_title": paper_title,
+            "problem": problem,
             "task": self.task,
-            "generated_prompts": self.generated_prompts,
             "reasoning_steps": self.reasoning_steps,
+            "solution": solution,
+            "reflection": reflection,
+            "behaviors": step3.get("behaviors", {}),
+            "behavior_book": self.behavior_book,
             "total_steps": len(self.reasoning_steps),
             "complete_reasoning": self._format_complete_reasoning(),
         }
@@ -491,45 +370,51 @@ class ChainOfThoughtReader:
         return "\n".join(formatted)
 
     def save_reasoning(self, reasoning_result: Dict, output_path: Optional[str] = None):
-        """Save the complete reasoning process to a file"""
+        """Save the complete reasoning process and behavior book to files"""
         if output_path is None:
-            output_path = f"reasoning_{Path(reasoning_result['paper_path']).stem}.txt"
+            # Create a safe filename from the problem/question
+            safe_name = re.sub(r'[^\w\s-]', '', reasoning_result.get('problem', 'reasoning')[:50])
+            safe_name = re.sub(r'[-\s]+', '_', safe_name)
+            output_path = f"reasoning_{safe_name}.txt"
 
         with open(output_path, "w", encoding="utf-8") as f:
-            f.write(f"Paper: {reasoning_result['paper_title']}\n")
-            f.write(f"Path: {reasoning_result['paper_path']}\n")
+            f.write(f"Problem/Question: {reasoning_result.get('problem', 'N/A')}\n")
             f.write(f"\n{'='*80}\n")
-            f.write("COMPLETE REASONING PROCESS\n")
-            f.write(f"{'='*80}\n")
+            f.write("BEHAVIOR CURATION PIPELINE RESULTS\n")
+            f.write(f"{'='*80}\n\n")
             f.write(reasoning_result["complete_reasoning"])
+            f.write(f"\n\n{'='*80}\n")
+            f.write("BEHAVIOR BOOK\n")
+            f.write(f"{'='*80}\n\n")
+            for behavior_name, behavior_desc in reasoning_result.get("behavior_book", {}).items():
+                f.write(f"{behavior_name}: {behavior_desc}\n")
 
         # Also save as JSON for structured access
         json_path = output_path.replace(".txt", ".json")
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(reasoning_result, f, indent=2, ensure_ascii=False)
 
-        print("\nReasoning saved to:")
+        # Save behavior book separately as JSON
+        behavior_book_path = output_path.replace(".txt", "_behavior_book.json")
+        with open(behavior_book_path, "w", encoding="utf-8") as f:
+            json.dump(reasoning_result.get("behavior_book", {}), f, indent=2, ensure_ascii=False)
+
+        print("\nResults saved to:")
         print(f"  - {output_path}")
         print(f"  - {json_path}")
+        print(f"  - {behavior_book_path}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Chain-of-Thought Paper Reader with 4-step reasoning process"
-    )
-    parser.add_argument(
-        "-p",
-        "--paper",
-        type=str,
-        default=None,
-        help="Path to the paper PDF (default: first paper found in data/papers/iclr23_top5)",
+        description="Behavior Curation Pipeline - Metacognitive Reuse for LLM Reasoning"
     )
     parser.add_argument(
         "-t",
         "--task",
         type=str,
         default=None,
-        help="Task/question to guide the analysis (default: general analysis)",
+        help="Problem/question to solve (required for behavior extraction)",
     )
     parser.add_argument(
         "-m",
@@ -556,20 +441,28 @@ if __name__ == "__main__":
     )
 
     try:
-        result = reader.read_paper(paper_path=args.paper, task=args.task)
+        if not args.task:
+            print("Error: Please provide a problem/question using -t or --task")
+            print("Example: python client.py -t 'Find the area of a circle with radius 4'")
+            exit(1)
+        
+        result = reader.read_paper(task=args.task)
         reader.save_reasoning(result)
 
         print("\n" + "=" * 80)
-        print("REASONING PROCESS COMPLETE")
+        print("BEHAVIOR CURATION PIPELINE COMPLETE")
         print("=" * 80)
         print(result["complete_reasoning"])
+        print("\n" + "=" * 80)
+        print("EXTRACTED BEHAVIORS")
+        print("=" * 80)
+        for behavior_name, behavior_desc in result.get("behavior_book", {}).items():
+            print(f"\n{behavior_name}: {behavior_desc}")
     except Exception as e:
         print(f"Error: {e}")
         print("\nMake sure you have:")
-        print("1. Scraped papers using scraper.py")
-        print("2. Installed required packages: pip install -r requirements.txt")
-        print("3. For GPU support, ensure CUDA is properly installed")
-        print("\nExample usage with different models:")
-        print("  python client.py -m deepseek-ai/DeepSeek-R1")
-        print("  python client.py -m meta-llama/Llama-2-7b-chat-hf")
-        print("  python client.py -m microsoft/phi-2")
+        print("1. Installed required packages: pip install -r requirements.txt")
+        print("2. For GPU support, ensure CUDA is properly installed")
+        print("\nExample usage:")
+        print("  python client.py -t 'Find the area of a circle with radius 4'")
+        print("  python client.py -t 'Solve: x^2 + 5x + 6 = 0' -m deepseek-ai/DeepSeek-R1")
