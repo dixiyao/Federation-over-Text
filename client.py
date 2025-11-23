@@ -30,9 +30,10 @@ class ChainOfThoughtReader:
         model_name: str = "deepseek-ai/DeepSeek-R1",
         task: Optional[str] = None,
         device: Optional[str] = None,
+        papers_dir: Optional[str] = None,
     ):
         self.model_name = model_name
-        self.papers_dir = "data/papers/iclr23_top5"
+        self.papers_dir = papers_dir or "data/papers/iclr23_top5"
         self.reasoning_steps = []
         self.task = (
             task
@@ -71,7 +72,7 @@ class ChainOfThoughtReader:
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.model_name,
                 trust_remote_code=True,
-                torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                dtype=torch.float16 if self.device == "cuda" else torch.float32,
                 device_map="auto" if self.device == "cuda" else None,
             )
             
@@ -107,6 +108,28 @@ class ChainOfThoughtReader:
         except Exception as e:
             print(f"Error reading PDF: {e}")
             return ""
+    
+    def _get_pdf_files(self, directory: str, max_papers: Optional[int] = None) -> list:
+        """Get list of PDF files from a directory"""
+        pdf_files = []
+        dir_path = Path(directory)
+        
+        if not dir_path.exists():
+            print(f"Warning: Directory {directory} does not exist")
+            return pdf_files
+        
+        # Find all PDF files
+        for pdf_file in dir_path.glob("*.pdf"):
+            pdf_files.append(str(pdf_file))
+        
+        # Sort for consistent ordering
+        pdf_files.sort()
+        
+        # Limit number of papers if specified
+        if max_papers is not None and max_papers > 0:
+            pdf_files = pdf_files[:max_papers]
+        
+        return pdf_files
 
     def _call_model(self, prompt: str, system_prompt: Optional[str] = None) -> str:
         """
@@ -131,18 +154,32 @@ class ChainOfThoughtReader:
         try:
             
             # Tokenize input
+            # For papers with ~80k characters, we need ~20-30k tokens
+            # DeepSeek-R1 supports large context windows (64k+ tokens)
+            # Use 65536 (64k) to handle very large papers
             inputs = self.tokenizer(
                 full_prompt,
                 return_tensors="pt",
                 truncation=True,
-                max_length=4096, 
+                max_length=65536,  # 64k tokens - enough for papers up to ~200k characters
             ).to(self.device)
+            
+            # Get input token count
+            input_token_count = inputs["input_ids"].shape[1]
+            
+            # Ensure max_new_tokens is larger than input tokens
+            # For large inputs, we want at least 1.5x the input tokens for generation
+            # Cap at 32768 (32k) to avoid memory issues while still allowing substantial output
+            max_new_tokens = max(int(input_token_count * 1.5), 4096)
+            max_new_tokens = min(max_new_tokens, 32768)  # Cap at 32k tokens
+            
+            print(f"Input tokens: {input_token_count}, Max new tokens: {max_new_tokens}")
             
             # Generate response
             with torch.no_grad():
                 outputs = self.model.generate(
                     **inputs,
-                    max_new_tokens=2048,  
+                    max_new_tokens=max_new_tokens,
                     temperature=0.7,
                     do_sample=True,
                     top_p=0.9,
@@ -171,18 +208,15 @@ Problem: {problem}"""
     def _get_reflection_prompt(self, problem: str, solution: str) -> str:
         """Get the Reflection Prompt as defined in the paper"""
         prompt = f"""
-Problem: {problem}
+#### Problem: {problem}
 
-Solution: {solution}
+#### Solution: {solution}
         
 Here is the definition of a behavior:
 - A note or skill to keep in mind while solving math problems.
 - A strategy, a trick, or a technique.
 - A general rule or a common sense principle.
 - Not a solution to the problem, but it can be used to solve the problem.
-
-For example - if the problem is "Find the area of a circle with radius 4", one useful behaviour could be:
-{{"behavior_area_of_circle": "area of a circle is pi*r^2"}}
 
 Given a problem and the corresponding solution, reflect and critique the solutions along the following dimensions:
 
@@ -215,13 +249,17 @@ Given a problem and the corresponding solution, reflect and critique the solutio
 
     def _get_behavior_prompt(self, problem: str, solution: str, reflection: str) -> str:
         """Get the Behavior Prompt as defined in the paper"""
-        prompt = f"""Problem: {problem}
+        prompt = f"""
+#### Problem: {problem}
 
-Solution: {solution}
+#### Solution: {solution}
 
-Reflection: {reflection}
+#### Reflection: {reflection}
 
-Now, given this reflection generate a list of behaviors and corresponding instructions/explanations in json format. Each behavior should be a single line, and the format is "behavior_[name]: [description]". The list should be in json format, and each behavior should be a key-value pair, where the key is the behavior name and the value is the description."""
+Now, given this reflection generate a list of behaviors and corresponding instructions/explanations in json format. Each behavior should be a single line, and the format is "behavior_[name]: [description]". The list should be in json format, and each behavior should be a key-value pair, where the key is the behavior name and the value is the description. You should integrate the reflection and the solution to generate the behaviors."""
+
+# For example - if the problem is "Find the area of a circle with radius 4", one useful behaviour could be:
+# {{"behavior_area_of_circle": "area of a circle is pi*r^2"}}. Do not use this example in your response. Focus on the problem and the solution providedto generate the behaviors.
         return prompt
 
     def _step_solution(self, problem: str) -> Dict:
@@ -230,6 +268,7 @@ Now, given this reflection generate a list of behaviors and corresponding instru
         
         system_prompt = None
         response = self._call_model(prompt, system_prompt)
+        print(f"Solution Response: {response}")
 
         step_result = {
             "step": 1,
@@ -248,6 +287,7 @@ Now, given this reflection generate a list of behaviors and corresponding instru
         
         system_prompt = None
         response = self._call_model(prompt, system_prompt)
+        print(f"Reflection Response: {response}")
 
         step_result = {
             "step": 2,
@@ -266,34 +306,80 @@ Now, given this reflection generate a list of behaviors and corresponding instru
         
         system_prompt = None
         response = self._call_model(prompt, system_prompt)
+        print(f"Behavior Extraction Response: {response}")
 
         # Try to parse behaviors from JSON response
         behaviors = {}
+        formatted_json_array = None  # Store the original formatted JSON array
+        
         try:
-            # Try to extract JSON from the response
-            json_match = re.search(r"\{.*\}", response, re.DOTALL)
-            if json_match:
-                behaviors = json.loads(json_match.group())
-                # Update behavior book
-                self.behavior_book.update(behaviors)
+            # First, try to extract JSON from markdown code blocks (```json ... ```)
+            json_code_block = re.search(r'```(?:json)?\s*(\[.*?\]|\{.*?\})\s*```', response, re.DOTALL)
+            if json_code_block:
+                json_str = json_code_block.group(1)
             else:
+                # Try to find JSON array [...]
+                json_array_match = re.search(r'\[[\s\S]*?\]', response)
+                if json_array_match:
+                    json_str = json_array_match.group(0)
+                else:
+                    # Try to find JSON object {...}
+                    json_object_match = re.search(r'\{[\s\S]*?\}', response)
+                    if json_object_match:
+                        json_str = json_object_match.group(0)
+                    else:
+                        json_str = None
+            
+            if json_str:
+                try:
+                    json_data = json.loads(json_str)
+                    # Store the original formatted JSON array if it's an array
+                    if isinstance(json_data, list):
+                        formatted_json_array = json_data
+                        # Also convert to behavior_book format for internal use
+                        for item in json_data:
+                            if isinstance(item, dict):
+                                # Handle format: {"behavior": "name", "description": "desc"}
+                                if "behavior" in item and "description" in item:
+                                    behavior_name = item["behavior"]
+                                    # Ensure behavior name starts with "behavior_"
+                                    if not behavior_name.startswith("behavior_"):
+                                        behavior_name = f"behavior_{behavior_name}"
+                                    behaviors[behavior_name] = item["description"]
+                                # Handle format: {"behavior_name": "description"}
+                                else:
+                                    behaviors.update(item)
+                    elif isinstance(json_data, dict):
+                        behaviors = json_data
+                    
+                    if behaviors:
+                        self.behavior_book.update(behaviors)
+                except json.JSONDecodeError as e:
+                    print(f"Warning: JSON decode error: {e}")
+            
+            # If still no behaviors, try manual extraction
+            if not behaviors:
                 print("Warning: Could not parse JSON from behavior extraction. Attempting manual extraction.")
                 # Try to extract behaviors manually (look for behavior_* patterns)
                 behavior_pattern = r'["\']?(behavior_\w+)["\']?\s*[:=]\s*["\']?([^"\']+)["\']?'
                 matches = re.findall(behavior_pattern, response)
                 for name, desc in matches:
                     behaviors[name] = desc.strip()
-                self.behavior_book.update(behaviors)
+                if behaviors:
+                    self.behavior_book.update(behaviors)
+                
         except Exception as e:
             print(f"Warning: Error parsing behaviors: {e}. Storing raw response.")
-            behaviors = {"raw_response": response}
-
+            if not behaviors:
+                behaviors = {"raw_response": response}
+        
         step_result = {
             "step": 3,
             "name": "Behavior Extraction",
             "prompt": prompt,
             "response": response,
             "behaviors": behaviors,
+            "formatted_json_array": formatted_json_array,  # Store the original formatted JSON array
             "timestamp": time.time(),
         }
 
@@ -301,7 +387,7 @@ Now, given this reflection generate a list of behaviors and corresponding instru
         return step_result
 
     def read_paper(
-        self, task: Optional[str] = None
+        self, task: Optional[str] = None, paper_content: Optional[str] = None
     ) -> Dict:
         """
         Main method to process a question/problem using behavior curation pipeline.
@@ -309,6 +395,7 @@ Now, given this reflection generate a list of behaviors and corresponding instru
 
         Args:
             task: Optional task/question/problem to solve. If None, uses the default task.
+            paper_content: Optional paper content to combine with the task/question.
 
         Returns:
             Dictionary containing all reasoning steps, behaviors, and behavior book.
@@ -317,10 +404,21 @@ Now, given this reflection generate a list of behaviors and corresponding instru
         if task is not None:
             self.task = task
 
-        # The task/question is treated as the problem to solve
-        problem = self.task
+        # Combine task/question with paper content
+        if paper_content:
+            problem = f"""User Question: {self.task}
 
-        print(f"Problem/Question: {problem}\n")
+Paper Content:
+{paper_content}
+
+Please answer the user's question based on the paper content provided above."""
+        else:
+            # The task/question is treated as the problem to solve
+            problem = self.task
+
+        print(f"Problem/Question: {self.task}\n")
+        if paper_content:
+            print(f"Paper content length: {len(paper_content)} characters\n")
 
         # Reset reasoning steps and behavior book
         self.reasoning_steps = []
@@ -347,16 +445,146 @@ Now, given this reflection generate a list of behaviors and corresponding instru
         result = {
             "problem": problem,
             "task": self.task,
-            "reasoning_steps": self.reasoning_steps,
-            "solution": solution,
-            "reflection": reflection,
-            "behaviors": step3.get("behaviors", {}),
+            # "reasoning_steps": self.reasoning_steps,
+            # "solution": solution,
+            # "reflection": reflection,
+            # "behaviors": step3.get("behaviors", {}),
             "behavior_book": self.behavior_book,
             "total_steps": len(self.reasoning_steps),
-            "complete_reasoning": self._format_complete_reasoning(),
+            # "complete_reasoning": self._format_complete_reasoning(),
         }
 
         return result
+    
+    def process_multiple_papers(
+        self, 
+        question: str, 
+        papers_dir: Optional[str] = None,
+        num_papers: Optional[int] = None
+    ) -> list:
+        """
+        Process multiple papers with a given question.
+        Each paper will generate its own behavior book.
+        
+        Args:
+            question: The user-provided question to answer for each paper
+            papers_dir: Directory containing PDF papers. If None, uses self.papers_dir
+            num_papers: Number of papers to process. If None, processes all papers.
+        
+        Returns:
+            List of results, one for each paper processed
+        """
+        # Use provided directory or default
+        directory = papers_dir or self.papers_dir
+        
+        # Get list of PDF files
+        pdf_files = self._get_pdf_files(directory, num_papers)
+        
+        if not pdf_files:
+            print(f"No PDF files found in {directory}")
+            return []
+        
+        print(f"Found {len(pdf_files)} PDF file(s) to process")
+        print(f"Question: {question}\n")
+        print("=" * 80)
+        
+        all_results = []
+        
+        for idx, pdf_path in enumerate(pdf_files, 1):
+            paper_name = Path(pdf_path).stem
+            print(f"\n{'='*80}")
+            print(f"Processing Paper {idx}/{len(pdf_files)}: {paper_name}")
+            print(f"{'='*80}\n")
+            
+            # Extract text from PDF
+            print(f"Extracting text from {paper_name}...")
+            paper_content = self._extract_text_from_pdf(pdf_path)
+            
+            if not paper_content:
+                print(f"Warning: Could not extract text from {pdf_path}. Skipping...")
+                continue
+            
+            print(f"Extracted {len(paper_content)} characters from paper\n")
+            
+            # Process this paper with the question
+            result = self.read_paper(task=question, paper_content=paper_content)
+            
+            # Add paper metadata to result
+            result["paper_path"] = pdf_path
+            result["paper_name"] = paper_name
+            result["paper_index"] = idx
+            
+            # Save results for this paper - extract formatted JSON array and save with file_number and paper_name
+            output_dir = Path("output")
+            output_dir.mkdir(exist_ok=True)
+            
+            # Get the formatted JSON array from the behavior extraction step
+            formatted_json = None
+            for step in result.get("reasoning_steps", []):
+                if step.get("step") == 3 and "formatted_json_array" in step:
+                    formatted_json = step.get("formatted_json_array")
+                    break
+            
+            # If no formatted JSON array found, fall back to behavior_book format
+            if formatted_json is None:
+                # Convert behavior_book to array format
+                formatted_json = [
+                    {
+                        "behavior": name.replace("behavior_", ""),
+                        "description": desc
+                    }
+                    for name, desc in result.get("behavior_book", {}).items()
+                ]
+            
+            # Save JSON with file_number, paper_name, and the formatted JSON array
+            output_data = {
+                "file_number": idx,
+                "paper_name": paper_name,
+                "behaviors": formatted_json
+            }
+            
+            output_path = output_dir / f"paper_{idx:02d}.json"
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump(output_data, f, indent=2, ensure_ascii=False)
+            
+            print(f"Saved behavior book to: {output_path}")
+            
+            all_results.append(result)
+            
+            print(f"\nCompleted paper {idx}/{len(pdf_files)}: {paper_name}")
+            print(f"Behaviors extracted: {len(result.get('behavior_book', {}))}")
+            print("-" * 80)
+        
+        # Save combined summary with all behavior books
+        summary = {
+            "question": question,
+            "papers_dir": directory,
+            "total_papers": len(all_results),
+            "papers": [
+                {
+                    "file_number": r["paper_index"],
+                    "paper_name": r["paper_name"],
+                    "paper_path": r["paper_path"],
+                    "behavior_book": r.get("behavior_book", {})
+                }
+                for r in all_results
+            ],
+            "total_behaviors": sum(len(r.get("behavior_book", {})) for r in all_results)
+        }
+        
+        summary_path = output_dir / "summary.json"
+        with open(summary_path, "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2, ensure_ascii=False)
+        
+        print(f"\n{'='*80}")
+        print("PROCESSING COMPLETE")
+        print(f"{'='*80}")
+        print(f"Total papers processed: {len(all_results)}")
+        print(f"Total behaviors extracted: {summary['total_behaviors']}")
+        print(f"Summary saved to: {summary_path}")
+        print(f"{'='*80}\n")
+        
+        return all_results
 
     def _format_complete_reasoning(self) -> str:
         """Format all reasoning steps into a complete reasoning process"""
@@ -430,6 +658,25 @@ if __name__ == "__main__":
         default=None,
         help="Device to use: 'cuda' or 'cpu' (default: auto-detect)",
     )
+    parser.add_argument(
+        "-p",
+        "--papers-dir",
+        type=str,
+        default=None,
+        help="Directory containing PDF papers to process (default: data/papers/iclr23_top5)",
+    )
+    parser.add_argument(
+        "-n",
+        "--num-papers",
+        type=int,
+        default=None,
+        help="Number of papers to process (default: all papers in directory)",
+    )
+    parser.add_argument(
+        "--single",
+        action="store_true",
+        help="Process a single question without papers (legacy mode)",
+    )
 
     args = parser.parse_args()
 
@@ -437,32 +684,60 @@ if __name__ == "__main__":
     reader = ChainOfThoughtReader(
         model_name=args.model, 
         task=args.task,
-        device=args.device
+        device=args.device,
+        papers_dir=args.papers_dir
     )
 
     try:
         if not args.task:
             print("Error: Please provide a problem/question using -t or --task")
-            print("Example: python client.py -t 'Find the area of a circle with radius 4'")
+            print("Example: python client.py -t 'What are the key contributions?' -n 5")
             exit(1)
         
-        result = reader.read_paper(task=args.task)
-        reader.save_reasoning(result)
+        # If --single flag is set or no papers directory specified, use legacy single mode
+        if args.single or (args.papers_dir is None and args.num_papers is None):
+            result = reader.read_paper(task=args.task)
+            reader.save_reasoning(result)
 
-        print("\n" + "=" * 80)
-        print("BEHAVIOR CURATION PIPELINE COMPLETE")
-        print("=" * 80)
-        print(result["complete_reasoning"])
-        print("\n" + "=" * 80)
-        print("EXTRACTED BEHAVIORS")
-        print("=" * 80)
-        for behavior_name, behavior_desc in result.get("behavior_book", {}).items():
-            print(f"\n{behavior_name}: {behavior_desc}")
+            print("\n" + "=" * 80)
+            print("BEHAVIOR CURATION PIPELINE COMPLETE")
+            print("=" * 80)
+            print(result["complete_reasoning"])
+            print("\n" + "=" * 80)
+            print("EXTRACTED BEHAVIORS")
+            print("=" * 80)
+            for behavior_name, behavior_desc in result.get("behavior_book", {}).items():
+                print(f"\n{behavior_name}: {behavior_desc}")
+        else:
+            # Process multiple papers
+            results = reader.process_multiple_papers(
+                question=args.task,
+                papers_dir=args.papers_dir,
+                num_papers=args.num_papers
+            )
+            
+            # Print summary of all behavior books
+            print("\n" + "=" * 80)
+            print("ALL BEHAVIOR BOOKS SUMMARY")
+            print("=" * 80)
+            for idx, result in enumerate(results, 1):
+                print(f"\nPaper {idx}: {result['paper_name']}")
+                print(f"  Behaviors: {len(result.get('behavior_book', {}))}")
+                for behavior_name, behavior_desc in list(result.get("behavior_book", {}).items())[:3]:
+                    print(f"    - {behavior_name}: {behavior_desc[:100]}...")
+                if len(result.get('behavior_book', {})) > 3:
+                    print(f"    ... and {len(result.get('behavior_book', {})) - 3} more")
+            
     except Exception as e:
         print(f"Error: {e}")
+        import traceback
+        traceback.print_exc()
         print("\nMake sure you have:")
         print("1. Installed required packages: pip install -r requirements.txt")
         print("2. For GPU support, ensure CUDA is properly installed")
         print("\nExample usage:")
-        print("  python client.py -t 'Find the area of a circle with radius 4'")
-        print("  python client.py -t 'Solve: x^2 + 5x + 6 = 0' -m deepseek-ai/DeepSeek-R1")
+        print("  # Process multiple papers:")
+        print("  python client.py -t 'What are the key contributions?' -n 5")
+        print("  python client.py -t 'Analyze this paper' -p data/papers/iclr23_top5 -n 10")
+        print("  # Single question mode:")
+        print("  python client.py -t 'Find the area of a circle with radius 4' --single")
