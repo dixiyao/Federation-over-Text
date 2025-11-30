@@ -236,36 +236,41 @@ class SkillAggregationServer:
             for name, description in skill_store.items()
         ])
         
-        prompt = f"""You are analyzing a collection of skills (methods, strategies, techniques) extracted from problem-solving processes.
-
-Skill Store:
+        prompt = f"""
+### Input  
+Skill Store (text):
 {skills_text}
 
-Your task is to provide a comprehensive reflection that points out the fundamental strengths and weaknesses of each skill (method). For each skill, analyze:
+### Task  
+Provide a comprehensive, structured reflection on each skill in the Skill Store. For each skill, analyze and comment on:
 
-1. **Strengths:**
-   - What problems does this skill solve effectively?
-   - What are its key advantages?
-   - When is this skill most useful?
-   - What makes it reliable or powerful?
+#### 1. Strengths  
+- What kinds of problems does this skill address effectively?  
+- What are the main advantages or strengths of using this skill?  
+- In what situations or contexts is this skill especially useful?  
+- What aspects make this skill reliable or powerful?
 
-2. **Weaknesses:**
-   - What are the limitations of this skill?
-   - When might this skill fail or be inappropriate?
-   - What assumptions does it make?
-   - What are potential pitfalls or edge cases?
+#### 2. Weaknesses  
+- What are the limitations or drawbacks of this skill?  
+- Under what circumstances might this skill fail, be inappropriate, or produce sub-optimal results?  
+- What assumptions does the skill make (explicit or implicit)?  
+- What are potential pitfalls or edge-cases?
 
-3. **Relationships:**
-   - How do these skills relate to each other?
-   - Are there complementary or conflicting skills?
-   - Can skills be combined for better results?
+#### 3. Relationships & Interactions  
+- How does this skill relate to other skills in the Skill Store?  
+- Are there skills that complement it (synergies)?  
+- Are there skills that conflict or overlap poorly (redundancies or contradictions)?  
+- Could combining certain skills yield better overall performance?
 
-4. **Overall Assessment:**
-   - What patterns emerge across all skills?
-   - What gaps exist in the skill collection?
-   - What improvements or additions would strengthen the collection?
+#### 4. Overall Assessment & Recommendations  
+- What patterns or insights emerge when reviewing all skills together (e.g., strengths common across many, recurring weaknesses, coverage gaps)?  
+- Are there missing skills (i.e., useful methods or techniques not present) that would strengthen the overall collection?  
+- What general improvements or recommendations would you propose to strengthen the skill collection as a whole?
 
-Provide a detailed, structured reflection that will help synthesize these skills into a comprehensive encyclopedia."""
+### Output Format  
+- Use clear section headings for each of the four analysis dimensions above.  
+- For each skill, present its analysis as a sub-block under its name, e.g.:
+"""
         
         return prompt
 
@@ -296,25 +301,54 @@ Provide a detailed, structured reflection that will help synthesize these skills
             for name, description in skill_store.items()
         ])
         
-        prompt = f"""You are creating an Encyclopedia Chapter that synthesizes a collection of skills (methods, strategies, techniques) for problem-solving.
+        prompt = f"""
+You are an expert editor assembling a comprehensive **“Encyclopedia Chapter”** about a collection of problem-solving skills.  
 
-Skill Store:
-{skills_text}
+Input:  
+- Skill Store (text):  
+  {skills_text}  
+- Reflection on Skills (text):  
+  {reflection}  
 
-Reflection on Skills:
-{reflection}
+Definition:  
+A **“skill”** is a generalizable method, strategy, or technique — not a one-off fix.  
+Each skill should be explained in a way that helps readers understand when and how to apply it.  
 
-Your task is to write a comprehensive Encyclopedia Chapter that:
-1. Organizes the skills into logical categories or themes
-2. Explains each skill clearly with context and examples
-3. Highlights relationships and connections between skills
-4. Provides guidance on when and how to use each skill
-5. Includes best practices and common pitfalls
-6. Creates a coherent narrative that helps readers understand the complete set of skills
+Task:  
+Write a full Encyclopedia Chapter that:
 
-The chapter should be well-structured, educational, and practical. It should read like a reference guide that someone could use to understand and apply these skills effectively.
+1. Organizes the skills into logical **categories or themes** (groups of related skills).  
+2. For each skill, explains it clearly — with context and (if helpful) a brief example of use.  
+3. Highlights **relationships and connections** among skills (e.g., complementary skills, overlapping skills, dependencies).  
+4. Provides **guidance** on when and how to use each skill (use-cases, typical situations where the skill is effective).  
+5. Notes **best practices** and **common pitfalls or limitations** for each skill.  
+6. Presents a **coherent narrative** covering the full set of skills, so that the chapter reads like a reference guide a practitioner could use to understand and apply these skills effectively.  
 
-Write the Encyclopedia Chapter now:"""
+Output Format:  
+Produce a single JSON object with the following schema:
+
+```json
+{
+  "chapter_title": "Skills Encyclopedia",
+  "categories": [
+    {
+      "category_name": "...",
+      "skills": [
+        {
+          "skill_name": "...",
+          "description": "...",
+          "use_cases": ["...","..."],
+          "best_practices": ["...","..."],
+          "pitfalls": ["...","..."],
+          "related_skills": ["...","..."]
+        },
+        ...
+      ]
+    },
+    ...
+  ]
+}
+"""
         
         return prompt
 
@@ -340,25 +374,71 @@ Write the Encyclopedia Chapter now:"""
 
     def _get_encyclopedia_prompt(self, existing_encyclopedia: str, new_chapter: str) -> str:
         """Get the Encyclopedia Prompt for synthesizing the complete Encyclopedia"""
-        prompt = f"""You are maintaining and updating a comprehensive Encyclopedia of problem-solving behaviors and methods.
+        prompt = f"""
+ You are a knowledge-base curator maintaining a comprehensive Encyclopedia of problem-solving methods and skills.
 
-Existing Encyclopedia:
-{existing_encyclopedia if existing_encyclopedia else "[No existing encyclopedia - this is the first chapter]"}
+Input:
+- Existing Encyclopedia (may be “[No existing encyclopedia – this is the first chapter]”):  
+  {existing_encyclopedia}  
+- New Encyclopedia Chapter to integrate:  
+  {new_chapter}
 
-New Encyclopedia Chapter to Integrate:
-{new_chapter}
+Task:
+Produce the updated, complete Encyclopedia by merging the new chapter into the existing one. Your output should satisfy:
 
-Your task is to create an updated, complete Encyclopedia that:
-1. Integrates the new chapter with the existing encyclopedia
-2. Maintains consistency in structure and style
-3. Resolves any conflicts or redundancies between old and new content
-4. Organizes all content into a coherent, navigable structure
-5. Ensures the encyclopedia is comprehensive yet well-organized
-6. Updates cross-references and relationships between sections
+1. **Integration & Structure**  
+   - Combine existing content and new chapter content into a unified structure.  
+   - Preserve or adapt the existing structure when possible; if no existing encyclopedia, build a full structure from the new chapter.  
+   - Ensure the final structure is hierarchical, coherent, and navigable (e.g., major sections / categories, sub-sections, skills entries).  
 
-If this is the first chapter, create a complete encyclopedia structure. If chapters already exist, integrate the new chapter seamlessly while maintaining the overall structure.
+2. **Conflict & Redundancy Resolution**  
+   - Detect and resolve duplicates — if the same skill or concept appears in both old and new content, merge them thoughtfully rather than duplicating.  
+   - If there are conflicting definitions or descriptions, reconcile them by merging the strengths of both or creating a consolidated, consistent version.  
 
-Provide the complete, updated Encyclopedia:"""
+3. **Cross-References & Relationships**  
+   - Update cross-references: ensure that citations, internal links or references between skills, sections, or categories remain correct.  
+   - Update relationships between skills: if new chapter introduces relations, reflect them globally.  
+
+4. **Consistency in Style & Format**  
+   - Use a uniform style, naming convention, and formatting for all entries (section headers, skill naming, categories, etc.).  
+   - Maintain consistent terminology, avoid duplication of categories under different names, and use clear, self-descriptive labels.  
+
+5. **Comprehensiveness & Organization**  
+   - Ensure that all skills from both existing encyclopedia and new chapter are included (unless a duplicate is merged).  
+   - Organize skills into logical categories or themes (e.g. “Mathematical Techniques”, “Reasoning Strategies”, “Verification & Error Checking”, etc.), to help readers navigate the encyclopedia.  
+   - Provide a Table-of-Contents (top-level index) listing all categories and the skills they contain.  
+
+Output Format:
+Produce the entire updated Encyclopedia in **JSON format**, using a nested structure. An example schema:
+
+```json
+{
+  "title": "Problem-Solving Skills Encyclopedia",
+  "version": 2,
+  "table_of_contents": [
+     {
+       "category_name": "...",
+       "skills": ["skill_name1", "skill_name2", ...]
+     },
+     ...
+  ],
+  "categories": [
+     {
+       "category_name": "...",
+       "skills": [
+         {
+           "skill_name": "...",
+           "description": "...",
+           // other metadata if available
+         },
+         ...
+       ]
+     },
+     ...
+  ]
+}
+```
+"""
         
         return prompt
 
@@ -408,9 +488,12 @@ Provide the complete, updated Encyclopedia:"""
         time.sleep(1)
 
         if not self.skill_store:
-            print("Warning: No skills found in collected files!")
+            files_processed = collection_result.get("files_processed", 0)
+            print(f"Warning: No skills found in {files_processed} collected files!")
             return {
                 "error": "No skills found",
+                "files_processed": files_processed,
+                "collection_result": collection_result,
                 "aggregation_steps": self.aggregation_steps,
             }
 
@@ -440,6 +523,12 @@ Provide the complete, updated Encyclopedia:"""
         result = {
             "skill_store": self.skill_store,
             "behavior_bookstore": self.skill_store,  # Keep for compatibility
+            "collection_metadata": {
+                "files_processed": collection_result.get("files_processed", 0),
+                "total_skills_collected": collection_result.get("total_skills", 0),
+                "problems": collection_result.get("problems", []),
+                "collected_books": collection_result.get("collected_books", {}),
+            },
             "reflection": reflection,
             "encyclopedia_chapter": new_chapter,
             "encyclopedia": self.encyclopedia,
