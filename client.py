@@ -208,58 +208,64 @@ Problem: {problem}"""
     def _get_reflection_prompt(self, problem: str, solution: str) -> str:
         """Get the Reflection Prompt as defined in the paper"""
         prompt = f"""
-#### Problem: {problem}
+You are given:
 
-#### Solution: {solution}
-        
-Here is the definition of a behavior:
-- A note or skill to keep in mind while solving math problems.
-- A strategy, a trick, or a technique.
-- A general rule or a common sense principle.
-- Not a solution to the problem, but it can be used to solve the problem.
+Problem:
+{problem}
 
-Given a problem and the corresponding solution, reflect and critique the solutions along the following dimensions:
+Proposed Solution:
+{solution}
 
-1. Correctness Analysis:
-   - Is the solution mathematically correct?
-   - Are there any calculation errors?
-   - Is the reasoning logically sound?
-   - Are all steps properly justified?
-   - What mistakes, if any, were made?
+Definition:
+A **“skill”** is a general, reusable method/strategy/technique — not a one-off answer. A skill should help solve this problem and many analogous problems.
 
-2. Missing Behaviors Analysis:
-   - What behaviors should have been used but weren't?
-   - Remember: a behavior is a note or instruction for quickly using concepts without deriving them from scratch.
-   - For each missing behavior, explain:
-     * How would it have reduced the length of the answer?
-     * How would it have prevented errors?
-     * Why is it crucial for similar problems?
-     * How would it have made the solution more elegant (even if correct)?
+Your task: Produce a structured, thorough critique of the proposed solution. Your output should have **three clearly labeled sections**:  
+---
 
-3. New Behavior Suggestions:
-   - Suggest specific new behaviors for similar problems.
-   - For each new behavior:
-     * The name must start with 'behavior_'
-     * Provide clear and actionable instructions
-     * Include examples where helpful
-     * Make sure it's general enough for similar problems
-     * Explain why this behavior is valuable
+### I. Correctness Analysis  
+- Verify whether the solution is correct under established scientific / mathematical / physical principles.  
+- Check every calculation and algebraic step for errors.  
+- Evaluate the logical soundness and justification of each step.  
+- Assess if the reasoning is generalizable (or is overly ad-hoc to this instance).  
+- Identify any conceptual flaws, misuse of assumptions, or violations of domain context or constraints.  
+- If relevant: assess whether the solution respects ethical, contextual, or domain-specific constraints.  
+
+### II. Missing Skills / Techniques Analysis  
+- Identify any generalizable skills or techniques (per above definition) that the author could have used but did not.  
+- For each missing skill:  
+    * Describe what the skill is.  
+    * Explain **how** using it could have simplified the solution (e.g., reduced length, improved clarity).  
+    * Explain **how** it could have prevented errors or improved robustness.  
+    * Explain **why** that skill is generally useful for this kind of problem or class of problems.  
+    * Optionally, show how a solution using that skill might look (concise sketch).  
+
+### III. New Skill Suggestions for Future Problems  
+- Propose **new, reusable skills** (techniques/approaches/heuristics) that would help with this and similar problems.  
+- For each proposed skill:  
+    * Name it with prefix `skill_`.  
+    * Provide a clear, actionable description of when and how to apply it.  
+    * Explain **why** this skill is valuable and in what kinds of problems or contexts it helps.   
 """
         return prompt
 
     def _get_behavior_prompt(self, problem: str, solution: str, reflection: str) -> str:
         """Get the Behavior Prompt as defined in the paper"""
         prompt = f"""
-#### Problem: {problem}
+You are given:
 
-#### Solution: {solution}
+- Problem: {problem}  
+- Proposed Solution: {solution}  
+- Reflection / Critique: {reflection}
 
-#### Reflection: {reflection}
+Your task:  
+Generate a JSON object whose keys are skill names and whose values are skill descriptions. Each skill name **must** begin with `skill_`. Each skill should be a single line, and the format is "skill_[name]: [description]". Each description **must** be a **single line** (no newline characters). Do **not** invent skills outside of what can be inferred from the problem, solution, and reflection. Do **not** include any commentary or extra text — output **only** the JSON object.
 
-Now, given this reflection generate a list of behaviors and corresponding instructions/explanations in json format. Each behavior should be a single line, and the format is "behavior_[name]: [description]". The list should be in json format, and each behavior should be a key-value pair, where the key is the behavior name and the value is the description. You should integrate the reflection and the solution to generate the behaviors."""
-
-# For example - if the problem is "Find the area of a circle with radius 4", one useful behaviour could be:
-# {{"behavior_area_of_circle": "area of a circle is pi*r^2"}}. Do not use this example in your response. Focus on the problem and the solution providedto generate the behaviors.
+Example format:
+{
+  "skill_exampleName": "Description of the skill.",
+  "skill_anotherOne": "Another skill description."
+}
+"""
         return prompt
 
     def _step_solution(self, problem: str) -> Dict:
@@ -340,13 +346,12 @@ Now, given this reflection generate a list of behaviors and corresponding instru
                         for item in json_data:
                             if isinstance(item, dict):
                                 # Handle format: {"behavior": "name", "description": "desc"}
-                                if "behavior" in item and "description" in item:
-                                    behavior_name = item["behavior"]
-                                    # Ensure behavior name starts with "behavior_"
-                                    if not behavior_name.startswith("behavior_"):
-                                        behavior_name = f"behavior_{behavior_name}"
-                                    behaviors[behavior_name] = item["description"]
-                                # Handle format: {"behavior_name": "description"}
+                                if "skill" in item and "description" in item:
+                                    skill_name = item["skill"]
+                                    # Ensure skill name starts with "skill_"
+                                    if not skill_name.startswith("skill_"):
+                                        skill_name = f"skill_{skill_name}"
+                                    behaviors[skill_name] = item["description"]
                                 else:
                                     behaviors.update(item)
                     elif isinstance(json_data, dict):
