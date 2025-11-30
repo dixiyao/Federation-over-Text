@@ -69,11 +69,20 @@ class ChainOfThoughtReader:
             )
             
             # Load model
+            # Use torch_dtype instead of dtype for from_pretrained
+            model_kwargs = {
+                "trust_remote_code": True,
+            }
+            
+            if self.device == "cuda":
+                model_kwargs["torch_dtype"] = torch.float16
+                model_kwargs["device_map"] = "auto"
+            else:
+                model_kwargs["torch_dtype"] = torch.float32
+            
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.model_name,
-                trust_remote_code=True,
-                dtype=torch.float16 if self.device == "cuda" else torch.float32,
-                device_map="auto" if self.device == "cuda" else None,
+                **model_kwargs
             )
             
             if self.device == "cpu":
