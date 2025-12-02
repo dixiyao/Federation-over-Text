@@ -347,26 +347,28 @@ Output Format:
 Produce a single JSON object with the following schema:
 
 ```json
-{
+{{
   "chapter_title": "Skills Encyclopedia",
   "categories": [
-    {
+    {{
       "category_name": "...",
       "skills": [
-        {
+        {{
           "skill_name": "...",
           "description": "...",
+          "behaviors": ["observable pattern 1", "observable pattern 2"],
           "use_cases": ["...","..."],
           "best_practices": ["...","..."],
           "pitfalls": ["...","..."],
           "related_skills": ["...","..."]
-        },
+        }},
         ...
       ]
-    },
+    }},
     ...
   ]
-}
+}}
+```
 """
         
         return prompt
@@ -440,18 +442,18 @@ Output Format:
 Produce the entire updated Encyclopedia in **JSON format**, using a nested structure. An example schema:
 
 ```json
-{
+{{
   "title": "Problem-Solving Skills Encyclopedia",
   "version": 2,
   "table_of_contents": [
-     {
+     {{
        "category_name": "...",
        "skills": ["skill_name1", "skill_name2", ...]
-     },
+     }},
      ...
   ],
   "categories": [
-     {
+     {{
        "category_name": "...",
        "skills": [
          {{
@@ -465,10 +467,10 @@ Produce the entire updated Encyclopedia in **JSON format**, using a nested struc
          }},
          ...
        ]
-     },
+     }},
      ...
   ]
-}
+}}
 ```
 """
         
