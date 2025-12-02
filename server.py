@@ -7,6 +7,7 @@ Follows the pipeline: Collect Skill Books → Aggregate Skill Store → Reflecti
 import argparse
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -226,6 +227,118 @@ class SkillAggregationServer:
         
         self.aggregation_steps.append(step_result)
         print(f"\nCollected {len(all_skills)} unique skills from {len(collected_books)} files")
+        
+        return step_result
+
+    def _get_skill_aggregation_prompt(self, raw_skill_store: Dict) -> str:
+        """Get the prompt for intelligently aggregating similar skills"""
+        # Format all skills for the prompt
+        skills_text = "\n".join([
+            f"- {name}: {description}"
+            for name, description in raw_skill_store.items()
+        ])
+        
+        prompt = f"""
+### Input
+Raw Skill Collection (from multiple sources):
+{skills_text}
+
+### Task: Intelligent Skill Aggregation
+You are analyzing a collection of skills extracted from multiple problem-solving processes. Your task is to intelligently aggregate these skills by:
+
+1. **Identifying Similar/Duplicate Skills:**
+   - Find skills that are essentially the same or very similar (different names but same concept)
+   - Identify skills that are variations or refinements of the same core technique
+   - Detect skills that overlap significantly in their application
+
+2. **Merging Similar Skills:**
+   - For similar skills, create a unified skill with:
+     * A canonical name (prefer the most descriptive or commonly used name)
+     * A comprehensive description that captures the essence of all variations
+     * Clear indication of when and how to apply it
+   - Preserve important nuances from different variations
+   - Remove true duplicates while keeping complementary aspects
+
+3. **Organizing Distinct Skills:**
+   - Keep skills that are genuinely distinct
+   - Ensure each skill in the final set is unique and valuable
+   - Maintain clarity about what each skill does and when to use it
+
+### Output Format
+Provide a JSON object with two keys:
+
+1. **"aggregation_reasoning"**: A detailed explanation of:
+   - Which skills you identified as similar/duplicate
+   - How you merged them and why
+   - What the final aggregated skill set represents
+
+2. **"aggregated_skills"**: A JSON object where:
+   - Keys are skill names (must start with `skill_`)
+   - Values are comprehensive skill descriptions
+   - Each skill should be a single line description
+   - The set should be deduplicated and intelligently merged
+
+Example format:
+```json
+{{
+  "aggregation_reasoning": "I identified that skill_pattern_matching and skill_recognize_patterns are essentially the same concept... I merged skill_math_formula and skill_apply_formula into a unified skill_apply_mathematical_formula...",
+  "aggregated_skills": {{
+    "skill_pattern_matching": "Recognize and apply patterns in problem structures to identify solution approaches.",
+    "skill_apply_mathematical_formula": "Apply relevant mathematical formulas with proper context and variable substitution.",
+    ...
+  }}
+}}
+```
+
+Now, analyze and aggregate the skills:
+"""
+        return prompt
+
+    def _step_skill_aggregation(self, raw_skill_store: Dict) -> Dict:
+        """Step 1.5: Intelligently aggregate similar skills with reasoning"""
+        prompt = self._get_skill_aggregation_prompt(raw_skill_store)
+        
+        system_prompt = None
+        response = self._call_model(prompt, system_prompt)
+        print(f"Skill aggregation completed ({len(response)} characters)")
+
+        # Parse the aggregated skills
+        aggregated_skills = {}
+        aggregation_reasoning = ""
+        
+        try:
+            # Try to extract JSON from the response
+            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group())
+                aggregated_skills = result.get("aggregated_skills", {})
+                aggregation_reasoning = result.get("aggregation_reasoning", "")
+                
+                # Update the skill store with aggregated skills
+                self.skill_store = aggregated_skills
+            else:
+                print("Warning: Could not parse JSON from aggregation. Using raw skills.")
+                aggregated_skills = raw_skill_store
+                self.skill_store = raw_skill_store
+        except Exception as e:
+            print(f"Warning: Error parsing aggregated skills: {e}. Using raw skills.")
+            aggregated_skills = raw_skill_store
+            self.skill_store = raw_skill_store
+
+        step_result = {
+            "step": 1.5,
+            "name": "Intelligent Skill Aggregation",
+            "prompt": prompt,
+            "response": response,
+            "aggregation_reasoning": aggregation_reasoning,
+            "raw_skills_count": len(raw_skill_store),
+            "aggregated_skills_count": len(aggregated_skills),
+            "aggregated_skills": aggregated_skills,
+            "timestamp": time.time(),
+        }
+
+        self.aggregation_steps.append(step_result)
+        print(f"\nAggregated {len(raw_skill_store)} raw skills into {len(aggregated_skills)} unique skills")
         
         return step_result
 
@@ -531,6 +644,21 @@ Produce the entire updated Encyclopedia in **JSON format**, using a nested struc
                 "aggregation_steps": self.aggregation_steps,
             }
 
+        # Step 1.5: Intelligently Aggregate Similar Skills
+        print("\n" + "="*80)
+        print("STEP 1.5: Intelligently Aggregating Similar Skills")
+        print("="*80)
+        raw_skill_store = self.skill_store.copy()  # Keep raw skills for reference
+        aggregation_result = self._step_skill_aggregation(raw_skill_store)
+        time.sleep(1)
+
+        if not self.skill_store:
+            print("Warning: No skills after aggregation!")
+            return {
+                "error": "No skills after aggregation",
+                "aggregation_steps": self.aggregation_steps,
+            }
+
         # Step 2: Reflection on Skills
         print("\n" + "="*80)
         print("STEP 2: Generating Reflection on Skills")
@@ -555,17 +683,20 @@ Produce the entire updated Encyclopedia in **JSON format**, using a nested struc
 
         # Compile results
         result = {
-            "skill_store": self.skill_store,
+            "raw_skill_store": raw_skill_store,  # Original collected skills (before aggregation)
+            "skill_store": self.skill_store,  # Aggregated skills (after intelligent merging)
             "behavior_bookstore": self.skill_store,  # Keep for compatibility
+            "aggregation_reasoning": aggregation_result.get("aggregation_reasoning", ""),
             "collection_metadata": {
                 "files_processed": collection_result.get("files_processed", 0),
                 "total_skills_collected": collection_result.get("total_skills", 0),
+                "total_skills_after_aggregation": len(self.skill_store),
                 "problems": collection_result.get("problems", []),
                 "collected_books": collection_result.get("collected_books", {}),
             },
             "reflection": reflection,
             "encyclopedia_chapter": new_chapter,
-            "encyclopedia": self.encyclopedia,
+            "encyclopedia": self.encyclopedia,  # Final encyclopedia containing aggregated skills
             "aggregation_steps": self.aggregation_steps,
             "total_skills": len(self.skill_store),
             "total_behaviors": len(self.skill_store),  # Keep for compatibility
@@ -575,44 +706,16 @@ Produce the entire updated Encyclopedia in **JSON format**, using a nested struc
         return result
 
     def save_results(self, result: Dict, output_dir: str = "build/log"):
-        """Save aggregation results to files"""
+        """Save aggregation results - only the encyclopedia"""
         os.makedirs(output_dir, exist_ok=True)
         
-        # Save complete results as JSON
-        json_path = os.path.join(output_dir, "encyclopedia_result.json")
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2, ensure_ascii=False)
-        
-        # Save encyclopedia as text
-        txt_path = os.path.join(output_dir, "encyclopedia.txt")
-        with open(txt_path, "w", encoding="utf-8") as f:
-            f.write("="*80 + "\n")
-            f.write("SKILL ENCYCLOPEDIA\n")
-            f.write("="*80 + "\n\n")
+        # Save only the encyclopedia (main output)
+        encyclopedia_path = os.path.join(output_dir, "encyclopedia.txt")
+        with open(encyclopedia_path, "w", encoding="utf-8") as f:
             f.write(result.get("encyclopedia", "No encyclopedia generated."))
-            f.write("\n\n" + "="*80 + "\n")
-            f.write("SKILL STORE\n")
-            f.write("="*80 + "\n\n")
-            skill_store = result.get("skill_store", result.get("behavior_bookstore", {}))
-            for name, desc in skill_store.items():
-                f.write(f"{name}: {desc}\n")
         
-        # Save skill store separately
-        skill_store_path = os.path.join(output_dir, "skill_store.json")
-        skill_store = result.get("skill_store", result.get("behavior_bookstore", {}))
-        with open(skill_store_path, "w", encoding="utf-8") as f:
-            json.dump(skill_store, f, indent=2, ensure_ascii=False)
-        
-        # Also save as behavior_bookstore.json for compatibility
-        bookstore_path = os.path.join(output_dir, "behavior_bookstore.json")
-        with open(bookstore_path, "w", encoding="utf-8") as f:
-            json.dump(skill_store, f, indent=2, ensure_ascii=False)
-        
-        print("\nResults saved to:")
-        print(f"  - {json_path}")
-        print(f"  - {txt_path}")
-        print(f"  - {skill_store_path}")
-        print(f"  - {bookstore_path} (compatibility)")
+        print("\nEncyclopedia saved to:")
+        print(f"  - {encyclopedia_path}")
 
 
 if __name__ == "__main__":
