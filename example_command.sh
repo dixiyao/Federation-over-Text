@@ -8,4 +8,4 @@ python client.py -t "Find out the solutions to the proposed research questions i
 python server.py -i output -f output/paper_*.json -m deepseek-ai/DeepSeek-R1-Distill-Llama-8B -d cuda -o encyclopedia 
 
 # Step 4: Generate the answer with new encyclopedia
-python generate_server.py -e encyclopedia/encyclopedia.txt -q "Based on existing skills learned, provide a novel research question and potential solution" -m deepseek-ai/DeepSeek-R1-Distill-Llama-8B -d cuda -o answer.txt
+python generate_server.py -e encyclopedia/encyclopedia.txt -q "Based on existing skills learned, provide a novel research question around large diffusion language modeland potential solution" -m deepseek-ai/DeepSeek-R1-Distill-Llama-8B -d cuda -o answer.txt

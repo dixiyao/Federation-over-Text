@@ -105,7 +105,7 @@ You are an expert assistant with access to a comprehensive Skills Encyclopedia. 
 ### Task:
 Based on the Skills Encyclopedia above, provide a clear and comprehensive answer to the query. Reference specific skills, categories, or techniques from the encyclopedia when relevant. If the query requires skills or knowledge not in the encyclopedia, acknowledge this and provide the best answer you can based on the available information.
 
-Provide your answer:
+You should finally include a field starting with "## Answer:" and ending with "## End of Answer:". This field should contain the answer to the query.
 """
         return prompt
 
