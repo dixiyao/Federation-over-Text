@@ -307,17 +307,77 @@ Now, analyze and aggregate the skills:
         aggregation_reasoning = ""
         
         try:
-            # Try to extract JSON from the response
-            json_match = re.search(r'\{.*\}', response, re.DOTALL)
-            if json_match:
-                result = json.loads(json_match.group())
+            # Try multiple strategies to extract JSON
+            # Strategy 1: Look for JSON code blocks
+            json_code_block = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response, re.DOTALL)
+            if json_code_block:
+                json_str = json_code_block.group(1)
+            else:
+                # Strategy 2: Look for JSON object in the response
+                json_match = re.search(r'\{[\s\S]*?"aggregated_skills"[\s\S]*?\}', response, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(0)
+                else:
+                    # Strategy 3: Try to find any JSON object
+                    json_match = re.search(r'\{.*\}', response, re.DOTALL)
+                    if json_match:
+                        json_str = json_match.group(0)
+                    else:
+                        json_str = None
+            
+            if json_str:
+                # Clean up the JSON string
+                json_str = json_str.strip()
+                # Remove any trailing commas before closing braces
+                json_str = re.sub(r',\s*}', '}', json_str)
+                json_str = re.sub(r',\s*]', ']', json_str)
+                
+                result = json.loads(json_str)
                 aggregated_skills = result.get("aggregated_skills", {})
                 aggregation_reasoning = result.get("aggregation_reasoning", "")
                 
-                # Update the skill store with aggregated skills
-                self.skill_store = aggregated_skills
+                # If aggregated_skills is empty, try to get skills directly
+                if not aggregated_skills and isinstance(result, dict):
+                    # Maybe the response structure is different
+                    for key in result.keys():
+                        if "skill" in key.lower() or isinstance(result[key], dict):
+                            potential_skills = result[key]
+                            if isinstance(potential_skills, dict):
+                                # Check if it looks like a skill dictionary
+                                if all(k.startswith("skill_") for k in list(potential_skills.keys())[:3]):
+                                    aggregated_skills = potential_skills
+                                    break
+                
+                if aggregated_skills:
+                    # Update the skill store with aggregated skills
+                    self.skill_store = aggregated_skills
+                    print(f"Successfully parsed {len(aggregated_skills)} aggregated skills")
+                else:
+                    print("Warning: No aggregated_skills found in JSON. Using raw skills.")
+                    aggregated_skills = raw_skill_store
+                    self.skill_store = raw_skill_store
             else:
-                print("Warning: Could not parse JSON from aggregation. Using raw skills.")
+                print("Warning: Could not find JSON in aggregation response. Using raw skills.")
+                print("Response preview:", response[:200] + "..." if len(response) > 200 else response)
+                aggregated_skills = raw_skill_store
+                self.skill_store = raw_skill_store
+        except json.JSONDecodeError as e:
+            print(f"Warning: JSON decode error: {e}")
+            print("Attempting to extract skills manually...")
+            # Try to extract skills manually using pattern matching
+            skill_pattern = r'["\']?(skill_\w+)["\']?\s*[:=]\s*["\']([^"\']+)["\']'
+            matches = re.findall(skill_pattern, response)
+            if matches:
+                for name, desc in matches:
+                    aggregated_skills[name] = desc.strip()
+                if aggregated_skills:
+                    self.skill_store = aggregated_skills
+                    print(f"Extracted {len(aggregated_skills)} skills using pattern matching")
+                else:
+                    aggregated_skills = raw_skill_store
+                    self.skill_store = raw_skill_store
+            else:
+                print("Could not extract skills manually. Using raw skills.")
                 aggregated_skills = raw_skill_store
                 self.skill_store = raw_skill_store
         except Exception as e:
@@ -457,6 +517,8 @@ Write a full Encyclopedia Chapter that:
 - The chapter should help readers both understand skills and recognize the behaviors that indicate effective reasoning  
 
 Output Format:  
+**IMPORTANT: Output ONLY the JSON object. Do NOT include any explanations, thinking process, or commentary before or after the JSON.**
+
 Produce a single JSON object with the following schema:
 
 ```json
@@ -482,6 +544,8 @@ Produce a single JSON object with the following schema:
   ]
 }}
 ```
+
+Output ONLY the JSON object, nothing else.
 """
         
         return prompt
@@ -494,12 +558,15 @@ Produce a single JSON object with the following schema:
         response = self._call_model(prompt, system_prompt)
         print(f"Encyclopedia Chapter generated ({len(response)} characters)")
 
+        # Extract only JSON content, removing any explanatory text
+        json_content = self._extract_json_only(response)
+        
         step_result = {
             "step": 3,
             "name": "Encyclopedia Chapter Generation",
             "prompt": prompt,
             "response": response,
-            "chapter": response,
+            "chapter": json_content,  # Store only JSON content
             "timestamp": time.time(),
         }
 
@@ -585,9 +652,52 @@ Produce the entire updated Encyclopedia in **JSON format**, using a nested struc
   ]
 }}
 ```
+
+Output ONLY the JSON object, nothing else.
 """
         
         return prompt
+
+    def _extract_json_only(self, text: str) -> str:
+        """Extract only JSON content from response, removing any explanatory text"""
+        try:
+            # Strategy 1: Look for JSON in code blocks
+            json_code_block = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
+            if json_code_block:
+                return json_code_block.group(1).strip()
+            
+            # Strategy 2: Look for JSON object (find the first { and matching })
+            # Count braces to find the complete JSON object
+            start_idx = text.find('{')
+            if start_idx != -1:
+                brace_count = 0
+                for i in range(start_idx, len(text)):
+                    if text[i] == '{':
+                        brace_count += 1
+                    elif text[i] == '}':
+                        brace_count -= 1
+                        if brace_count == 0:
+                            json_str = text[start_idx:i+1]
+                            # Validate it's valid JSON
+                            json.loads(json_str)
+                            return json_str.strip()
+            
+            # Strategy 3: Try to find any JSON object
+            json_match = re.search(r'\{.*\}', text, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+                # Clean up and validate
+                json_str = json_str.strip()
+                json_str = re.sub(r',\s*}', '}', json_str)
+                json_str = re.sub(r',\s*]', ']', json_str)
+                json.loads(json_str)  # Validate
+                return json_str
+            
+            # If no JSON found, return original (shouldn't happen)
+            return text
+        except (json.JSONDecodeError, AttributeError):
+            # If extraction fails, return original text
+            return text
 
     def _step_encyclopedia_synthesis(self, new_chapter: str) -> Dict:
         """Step 4: Synthesize complete Encyclopedia from existing and new chapter"""
@@ -597,15 +707,18 @@ Produce the entire updated Encyclopedia in **JSON format**, using a nested struc
         response = self._call_model(prompt, system_prompt)
         print(f"Encyclopedia synthesized ({len(response)} characters)")
 
-        # Update the encyclopedia
-        self.encyclopedia = response
+        # Extract only JSON content, removing any explanatory text
+        json_content = self._extract_json_only(response)
+        
+        # Update the encyclopedia with only JSON content
+        self.encyclopedia = json_content
 
         step_result = {
             "step": 4,
             "name": "Encyclopedia Synthesis",
             "prompt": prompt,
             "response": response,
-            "encyclopedia": response,
+            "encyclopedia": json_content,  # Store only JSON content
             "timestamp": time.time(),
         }
 
