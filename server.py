@@ -229,7 +229,7 @@ class SkillAggregationServer:
         return step_result
 
     def _get_reflection_prompt(self, skill_store: Dict) -> str:
-        """Get the Reflection Prompt for analyzing skill strengths and weaknesses"""
+        """Get the Reflection Prompt for analyzing behaviors and improving reasoning"""
         # Format skills for the prompt
         skills_text = "\n".join([
             f"- {name}: {description}"
@@ -241,35 +241,38 @@ class SkillAggregationServer:
 Skill Store (text):
 {skills_text}
 
+### Context: Behaviors vs Skills
+Following the framework of generative models as complex systems science, we distinguish:
+- **Behaviors**: Observable patterns in how language models reason and solve problems (e.g., "tends to copy input patterns", "uses step-by-step decomposition", "applies domain-specific heuristics")
+- **Skills**: Reusable knowledge, methods, or techniques that can be extracted and stored (what we keep in the encyclopedia)
+
 ### Task  
-Provide a comprehensive, structured reflection on each skill in the Skill Store. For each skill, analyze and comment on:
+Analyze the reasoning behaviors that emerge from the application of these skills, and identify how behaviors can improve the reasoning process. For each skill, analyze:
 
-#### 1. Strengths  
-- What kinds of problems does this skill address effectively?  
-- What are the main advantages or strengths of using this skill?  
-- In what situations or contexts is this skill especially useful?  
-- What aspects make this skill reliable or powerful?
+#### 1. Observable Behaviors  
+- What **behaviors** (observable patterns) does using this skill typically produce in reasoning?  
+- How does the model behave differently when this skill is applied vs. when it's not?  
+- What patterns in the reasoning process indicate this skill is being used effectively?
 
-#### 2. Weaknesses  
-- What are the limitations or drawbacks of this skill?  
-- Under what circumstances might this skill fail, be inappropriate, or produce sub-optimal results?  
-- What assumptions does the skill make (explicit or implicit)?  
-- What are potential pitfalls or edge-cases?
+#### 2. Behavior-Based Strengths & Weaknesses  
+- What problems does this skill address effectively, and what behaviors demonstrate this?  
+- What are the limitations or failure modes, and what behaviors signal these limitations?  
+- Under what circumstances do behaviors indicate the skill is failing or inappropriate?
 
-#### 3. Relationships & Interactions  
-- How does this skill relate to other skills in the Skill Store?  
-- Are there skills that complement it (synergies)?  
-- Are there skills that conflict or overlap poorly (redundancies or contradictions)?  
-- Could combining certain skills yield better overall performance?
+#### 3. Behavioral Relationships & Interactions  
+- How do behaviors from different skills interact or conflict?  
+- What behavioral patterns emerge when skills are combined?  
+- Are there complementary behaviors that suggest skills should be used together?
 
-#### 4. Overall Assessment & Recommendations  
-- What patterns or insights emerge when reviewing all skills together (e.g., strengths common across many, recurring weaknesses, coverage gaps)?  
-- Are there missing skills (i.e., useful methods or techniques not present) that would strengthen the overall collection?  
-- What general improvements or recommendations would you propose to strengthen the skill collection as a whole?
+#### 4. Behavior-Guided Improvements  
+- What **new behaviors** could improve the reasoning process for problems requiring these skills?  
+- How can we modify or extend these skills to produce better reasoning behaviors?  
+- What behavioral patterns are missing that would strengthen the overall reasoning capability?
 
 ### Output Format  
 - Use clear section headings for each of the four analysis dimensions above.  
-- For each skill, present its analysis as a sub-block under its name, e.g.:
+- For each skill, identify the behaviors it produces and how those behaviors can guide reasoning improvements.  
+- Focus on observable patterns (behaviors) that can help us understand and improve reasoning, while keeping skills as the stored knowledge.
 """
         
         return prompt
@@ -302,27 +305,42 @@ Provide a comprehensive, structured reflection on each skill in the Skill Store.
         ])
         
         prompt = f"""
-You are an expert editor assembling a comprehensive **“Encyclopedia Chapter”** about a collection of problem-solving skills.  
+You are an expert editor assembling a comprehensive **"Encyclopedia Chapter"** about problem-solving skills, informed by behavioral analysis.  
 
 Input:  
 - Skill Store (text):  
   {skills_text}  
-- Reflection on Skills (text):  
+- Reflection on Behaviors and Skills (text):  
   {reflection}  
 
+### Framework: Behaviors Guide Skills
+Following complex systems science principles, we use **behaviors** (observable reasoning patterns) to understand and improve reasoning, while storing **skills** (reusable knowledge) in the encyclopedia.
+
 Definition:  
-A **“skill”** is a generalizable method, strategy, or technique — not a one-off fix.  
-Each skill should be explained in a way that helps readers understand when and how to apply it.  
+- **Skills**: Generalizable methods, strategies, or techniques stored in the encyclopedia  
+- **Behaviors**: Observable patterns in reasoning that emerge when skills are applied (used to improve reasoning, not stored)
 
 Task:  
 Write a full Encyclopedia Chapter that:
 
-1. Organizes the skills into logical **categories or themes** (groups of related skills).  
-2. For each skill, explains it clearly — with context and (if helpful) a brief example of use.  
-3. Highlights **relationships and connections** among skills (e.g., complementary skills, overlapping skills, dependencies).  
-4. Provides **guidance** on when and how to use each skill (use-cases, typical situations where the skill is effective).  
-5. Notes **best practices** and **common pitfalls or limitations** for each skill.  
-6. Presents a **coherent narrative** covering the full set of skills, so that the chapter reads like a reference guide a practitioner could use to understand and apply these skills effectively.  
+1. Organizes the skills into logical **categories or themes** based on the behavioral patterns identified in the reflection.  
+2. For each skill, explains it clearly with:
+   - Context and examples of use
+   - **Behaviors** that indicate the skill is being applied effectively
+   - How to recognize when the skill should be used based on observable reasoning patterns
+3. Highlights **relationships** among skills based on how their behaviors interact (complementary, conflicting, or sequential behaviors).  
+4. Provides **guidance** on when and how to use each skill, informed by the behavioral analysis:
+   - Use-cases where the skill produces effective reasoning behaviors
+   - Behavioral indicators that suggest the skill is appropriate
+5. Notes **best practices** and **pitfalls** based on behaviors:
+   - What behaviors signal successful application
+   - What behaviors indicate the skill is failing or misapplied
+6. Presents a **coherent narrative** that connects skills to behaviors, helping practitioners understand both what to know (skills) and how to recognize effective reasoning (behaviors).
+
+### Important:
+- Store **skills** in the encyclopedia (reusable knowledge)
+- Use **behaviors** to guide when and how to apply skills (observable patterns)
+- The chapter should help readers both understand skills and recognize the behaviors that indicate effective reasoning  
 
 Output Format:  
 Produce a single JSON object with the following schema:
@@ -375,13 +393,17 @@ Produce a single JSON object with the following schema:
     def _get_encyclopedia_prompt(self, existing_encyclopedia: str, new_chapter: str) -> str:
         """Get the Encyclopedia Prompt for synthesizing the complete Encyclopedia"""
         prompt = f"""
- You are a knowledge-base curator maintaining a comprehensive Encyclopedia of problem-solving methods and skills.
+You are a knowledge-base curator maintaining a comprehensive Encyclopedia of problem-solving skills, organized through behavioral analysis.
 
 Input:
-- Existing Encyclopedia (may be “[No existing encyclopedia – this is the first chapter]”):  
+- Existing Encyclopedia (may be "[No existing encyclopedia – this is the first chapter]"):  
   {existing_encyclopedia}  
 - New Encyclopedia Chapter to integrate:  
   {new_chapter}
+
+### Framework Reminder
+- **Skills**: Store reusable knowledge in the encyclopedia (what we keep)
+- **Behaviors**: Observable reasoning patterns that guide when/how to use skills (used to improve reasoning, not stored)
 
 Task:
 Produce the updated, complete Encyclopedia by merging the new chapter into the existing one. Your output should satisfy:
@@ -390,23 +412,28 @@ Produce the updated, complete Encyclopedia by merging the new chapter into the e
    - Combine existing content and new chapter content into a unified structure.  
    - Preserve or adapt the existing structure when possible; if no existing encyclopedia, build a full structure from the new chapter.  
    - Ensure the final structure is hierarchical, coherent, and navigable (e.g., major sections / categories, sub-sections, skills entries).  
+   - Organize based on behavioral patterns where applicable (skills with similar behaviors grouped together).
 
 2. **Conflict & Redundancy Resolution**  
-   - Detect and resolve duplicates — if the same skill or concept appears in both old and new content, merge them thoughtfully rather than duplicating.  
+   - Detect and resolve duplicates — if the same skill appears in both old and new content, merge them thoughtfully rather than duplicating.  
    - If there are conflicting definitions or descriptions, reconcile them by merging the strengths of both or creating a consolidated, consistent version.  
+   - When merging, preserve behavioral information that helps guide skill application.
 
 3. **Cross-References & Relationships**  
    - Update cross-references: ensure that citations, internal links or references between skills, sections, or categories remain correct.  
-   - Update relationships between skills: if new chapter introduces relations, reflect them globally.  
+   - Update relationships between skills based on behavioral interactions identified in the reflection.  
+   - Maintain behavioral indicators that help recognize when skills should be applied.
 
 4. **Consistency in Style & Format**  
    - Use a uniform style, naming convention, and formatting for all entries (section headers, skill naming, categories, etc.).  
-   - Maintain consistent terminology, avoid duplication of categories under different names, and use clear, self-descriptive labels.  
+   - Maintain consistent terminology distinguishing skills (stored knowledge) from behaviors (observable patterns).  
+   - Ensure behavioral information is consistently formatted across all skills.
 
 5. **Comprehensiveness & Organization**  
-   - Ensure that all skills from both existing encyclopedia and new chapter are included (unless a duplicate is merged).  
-   - Organize skills into logical categories or themes (e.g. “Mathematical Techniques”, “Reasoning Strategies”, “Verification & Error Checking”, etc.), to help readers navigate the encyclopedia.  
+   - Ensure that all **skills** from both existing encyclopedia and new chapter are included (unless a duplicate is merged).  
+   - Organize skills into logical categories or themes informed by behavioral patterns (e.g. "Mathematical Techniques", "Reasoning Strategies", "Verification & Error Checking", etc.).  
    - Provide a Table-of-Contents (top-level index) listing all categories and the skills they contain.  
+   - Include behavioral indicators for skills where available to guide effective application.  
 
 Output Format:
 Produce the entire updated Encyclopedia in **JSON format**, using a nested structure. An example schema:
@@ -426,11 +453,15 @@ Produce the entire updated Encyclopedia in **JSON format**, using a nested struc
      {
        "category_name": "...",
        "skills": [
-         {
+         {{
            "skill_name": "...",
            "description": "...",
-           // other metadata if available
-         },
+           "behaviors": ["observable pattern 1", "observable pattern 2"],
+           "use_cases": ["...","..."],
+           "best_practices": ["...","..."],
+           "pitfalls": ["...","..."],
+           "related_skills": ["...","..."]
+         }},
          ...
        ]
      },

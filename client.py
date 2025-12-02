@@ -259,7 +259,8 @@ Your task: Produce a structured, thorough critique of the proposed solution. You
 
     def _get_behavior_prompt(self, problem: str, solution: str, reflection: str) -> str:
         """Get the Behavior Prompt as defined in the paper"""
-        prompt = f"""
+        # Use string replacement to avoid f-string issues with curly braces in reflection
+        prompt_template = """
 You are given:
 
 - Problem: {problem}  
@@ -270,11 +271,16 @@ Your task:
 Generate a JSON object whose keys are skill names and whose values are skill descriptions. Each skill name **must** begin with `skill_`. Each skill should be a single line, and the format is "skill_[name]: [description]". Each description **must** be a **single line** (no newline characters). Do **not** invent skills outside of what can be inferred from the problem, solution, and reflection. Do **not** include any commentary or extra text — output **only** the JSON object.
 
 Example format:
-{
+{{
   "skill_exampleName": "Description of the skill.",
   "skill_anotherOne": "Another skill description."
-}
+}}
 """
+        prompt = prompt_template.format(
+            problem=problem,
+            solution=solution,
+            reflection=reflection
+        )
         return prompt
 
     def _step_solution(self, problem: str) -> Dict:
