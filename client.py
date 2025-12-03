@@ -10,7 +10,6 @@ import json
 import os
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -478,88 +477,20 @@ Please answer the user's question based on the paper content provided above."""
 
         return result
     
-    def _process_single_paper(self, pdf_path: str, question: str, idx: int, total: int) -> Optional[Dict]:
-        """Process a single paper - used for parallel processing"""
-        paper_name = Path(pdf_path).stem
-        print(f"\n[Thread] Processing Paper {idx}/{total}: {paper_name}")
-        
-        try:
-            # Extract text from PDF
-            paper_content = self._extract_text_from_pdf(pdf_path)
-            
-            if not paper_content:
-                print(f"[Thread] Warning: Could not extract text from {pdf_path}. Skipping...")
-                return None
-            
-            print(f"[Thread] Extracted {len(paper_content)} characters from {paper_name}")
-            
-            # Process this paper with the question
-            result = self.read_paper(task=question, paper_content=paper_content)
-            
-            # Add paper metadata to result
-            result["paper_path"] = pdf_path
-            result["paper_name"] = paper_name
-            result["paper_index"] = idx
-            
-            # Save results for this paper
-            output_dir = Path("output")
-            output_dir.mkdir(exist_ok=True)
-            
-            # Get the formatted JSON array from the behavior extraction step
-            formatted_json = None
-            for step in result.get("reasoning_steps", []):
-                if step.get("step") == 3 and "formatted_json_array" in step:
-                    formatted_json = step.get("formatted_json_array")
-                    break
-            
-            # If no formatted JSON array found, fall back to behavior_book format
-            if formatted_json is None:
-                formatted_json = [
-                    {
-                        "behavior": name.replace("behavior_", ""),
-                        "description": desc
-                    }
-                    for name, desc in result.get("behavior_book", {}).items()
-                ]
-            
-            # Save JSON
-            output_data = {
-                "file_number": idx,
-                "paper_name": paper_name,
-                "behaviors": formatted_json
-            }
-            
-            output_path = output_dir / f"paper_{idx:02d}.json"
-            with open(output_path, "w", encoding="utf-8") as f:
-                json.dump(output_data, f, indent=2, ensure_ascii=False)
-            
-            print(f"[Thread] Saved behavior book to: {output_path}")
-            print(f"[Thread] Completed {paper_name}: {len(result.get('behavior_book', {}))} behaviors")
-            
-            return result
-            
-        except Exception as e:
-            print(f"[Thread] Error processing {paper_name}: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
-
     def process_multiple_papers(
         self, 
         question: str, 
         papers_dir: Optional[str] = None,
-        num_papers: Optional[int] = None,
-        max_workers: Optional[int] = None
+        num_papers: Optional[int] = None
     ) -> list:
         """
-        Process multiple papers with a given question in parallel.
+        Process multiple papers with a given question sequentially.
         Each paper will generate its own behavior book.
         
         Args:
             question: The user-provided question to answer for each paper
             papers_dir: Directory containing PDF papers. If None, uses self.papers_dir
             num_papers: Number of papers to process. If None, processes all papers.
-            max_workers: Maximum number of parallel workers. If None, uses min(4, num_papers).
         
         Returns:
             List of results, one for each paper processed
@@ -578,52 +509,78 @@ Please answer the user's question based on the paper content provided above."""
         print(f"Question: {question}\n")
         print("=" * 80)
         
-        # Pre-load model to ensure it's available for all threads
-        print("Pre-loading model for parallel processing...")
-        self._load_model()
-        print("Model loaded. Starting parallel processing...\n")
-        
-        # Determine number of workers
-        if max_workers is None:
-            max_workers = min(4, len(pdf_files))  # Default to 4 workers or number of papers
-        
-        print(f"Using {max_workers} parallel workers\n")
-        
         all_results = []
-        
-        # Process papers in parallel using ThreadPoolExecutor
-        # Note: For GPU models, threads share the same GPU, so we use threading
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Submit all tasks
-            future_to_paper = {
-                executor.submit(
-                    self._process_single_paper, 
-                    pdf_path, 
-                    question, 
-                    idx + 1, 
-                    len(pdf_files)
-                ): (idx + 1, pdf_path)
-                for idx, pdf_path in enumerate(pdf_files)
-            }
-            
-            # Collect results as they complete
-            for future in as_completed(future_to_paper):
-                idx, pdf_path = future_to_paper[future]
-                try:
-                    result = future.result()
-                    if result:
-                        all_results.append(result)
-                except Exception as e:
-                    paper_name = Path(pdf_path).stem
-                    print(f"Error processing {paper_name}: {e}")
-        
-        # Sort results by paper_index to maintain order
-        all_results.sort(key=lambda x: x.get("paper_index", 0))
-        
-        # Save summary
         output_dir = Path("output")
         output_dir.mkdir(exist_ok=True)
         
+        # Process papers sequentially
+        for idx, pdf_path in enumerate(pdf_files, 1):
+            paper_name = Path(pdf_path).stem
+            print(f"\n{'='*80}")
+            print(f"Processing Paper {idx}/{len(pdf_files)}: {paper_name}")
+            print(f"{'='*80}\n")
+            
+            try:
+                # Extract text from PDF
+                print(f"Extracting text from {paper_name}...")
+                paper_content = self._extract_text_from_pdf(pdf_path)
+                
+                if not paper_content:
+                    print(f"Warning: Could not extract text from {pdf_path}. Skipping...")
+                    continue
+                
+                print(f"Extracted {len(paper_content)} characters from paper\n")
+                
+                # Process this paper with the question
+                result = self.read_paper(task=question, paper_content=paper_content)
+                
+                # Add paper metadata to result
+                result["paper_path"] = pdf_path
+                result["paper_name"] = paper_name
+                result["paper_index"] = idx
+                
+                # Get the formatted JSON array from the behavior extraction step
+                formatted_json = None
+                for step in result.get("reasoning_steps", []):
+                    if step.get("step") == 3 and "formatted_json_array" in step:
+                        formatted_json = step.get("formatted_json_array")
+                        break
+                
+                # If no formatted JSON array found, fall back to behavior_book format
+                if formatted_json is None:
+                    formatted_json = [
+                        {
+                            "behavior": name.replace("behavior_", ""),
+                            "description": desc
+                        }
+                        for name, desc in result.get("behavior_book", {}).items()
+                    ]
+                
+                # Save JSON
+                output_data = {
+                    "file_number": idx,
+                    "paper_name": paper_name,
+                    "behaviors": formatted_json
+                }
+                
+                output_path = output_dir / f"paper_{idx:02d}.json"
+                with open(output_path, "w", encoding="utf-8") as f:
+                    json.dump(output_data, f, indent=2, ensure_ascii=False)
+                
+                print(f"Saved behavior book to: {output_path}")
+                print(f"\nCompleted paper {idx}/{len(pdf_files)}: {paper_name}")
+                print(f"Behaviors extracted: {len(result.get('behavior_book', {}))}")
+                print("-" * 80)
+                
+                all_results.append(result)
+                
+            except Exception as e:
+                print(f"Error processing {paper_name}: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
+        
+        # Save summary
         summary = {
             "total_papers": len(all_results),
             "papers": [
@@ -741,13 +698,6 @@ if __name__ == "__main__":
         action="store_true",
         help="Process a single question without papers (legacy mode)",
     )
-    parser.add_argument(
-        "-w",
-        "--workers",
-        type=int,
-        default=None,
-        help="Number of parallel workers for processing papers (default: min(4, num_papers))",
-    )
 
     args = parser.parse_args()
 
@@ -780,12 +730,11 @@ if __name__ == "__main__":
             for behavior_name, behavior_desc in result.get("behavior_book", {}).items():
                 print(f"\n{behavior_name}: {behavior_desc}")
         else:
-            # Process multiple papers in parallel
+            # Process multiple papers sequentially
             results = reader.process_multiple_papers(
                 question=args.task,
                 papers_dir=args.papers_dir,
-                num_papers=args.num_papers,
-                max_workers=args.workers
+                num_papers=args.num_papers
             )
             
             # Print summary of all behavior books

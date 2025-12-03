@@ -140,9 +140,7 @@ You should finally include a field starting with "## Answer:" and ending with "#
             # Calculate input token count for dynamic output sizing
             input_token_count = inputs["input_ids"].shape[1]
             
-            # Generate response - dynamically size based on input
-            max_new_tokens = max(int(input_token_count * 1.5), 4096)
-            max_new_tokens = min(max_new_tokens, 32768)  # Cap at 32k tokens
+            max_new_tokens = 98304 # ~70k words
             
             print(f"Input tokens: {input_token_count}, Max new tokens: {max_new_tokens}")
             

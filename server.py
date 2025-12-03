@@ -9,7 +9,6 @@ import json
 import os
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -157,39 +156,12 @@ class SkillAggregationServer:
             print(f"Error calling model: {e}")
             return f"[Error] Model generation failed: {str(e)}"
 
-    def _read_single_json_file(self, json_file: str) -> Optional[Dict]:
-        """Read a single JSON file - used for parallel processing"""
-        try:
-            with open(json_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            
-            # Extract skill book (client.py uses "behavior_book" key but contains skills)
-            skill_book = data.get("behavior_book", {})
-            if not skill_book:
-                # Try alternative keys
-                skill_book = data.get("behaviors", {}) or data.get("skills", {})
-            
-            if skill_book:
-                filename = Path(json_file).stem
-                return {
-                    "filename": filename,
-                    "problem": data.get("problem", "Unknown"),
-                    "skill_book": skill_book,
-                    "solution": data.get("solution", ""),
-                    "reflection": data.get("reflection", ""),
-                }
-            return None
-        except Exception as e:
-            print(f"  [Thread] Warning: Failed to read {json_file}: {e}")
-            return None
-
-    def collect_skill_books(self, json_files: Optional[List[str]] = None, max_workers: Optional[int] = None) -> Dict:
+    def collect_skill_books(self, json_files: Optional[List[str]] = None) -> Dict:
         """
-        Step 1: Collect skill books from multiple client result JSON files in parallel.
+        Step 1: Collect skill books from multiple client result JSON files sequentially.
         
         Args:
             json_files: List of JSON file paths. If None, scans input_dir for JSON files.
-            max_workers: Maximum number of parallel workers. If None, uses min(8, num_files).
         
         Returns:
             Dictionary containing collected skill books and metadata.
@@ -203,45 +175,40 @@ class SkillAggregationServer:
         
         print(f"Collecting skill books from {len(json_files)} files...")
         
-        # Determine number of workers for parallel I/O
-        if max_workers is None:
-            max_workers = min(8, len(json_files))  # Default to 8 workers or number of files
-        
         collected_books = {}
         all_skills = {}
         problems = []
         
-        # Read JSON files in parallel
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_file = {
-                executor.submit(self._read_single_json_file, json_file): json_file
-                for json_file in json_files
-            }
-            
-            # Collect results as they complete
-            for future in as_completed(future_to_file):
-                json_file = future_to_file[future]
-                try:
-                    result = future.result()
-                    if result:
-                        filename = result["filename"]
-                        skill_book = result["skill_book"]
-                        
-                        collected_books[filename] = {
-                            "problem": result["problem"],
-                            "skill_book": skill_book,
-                            "behavior_book": skill_book,  # Keep for compatibility
-                            "solution": result["solution"],
-                            "reflection": result["reflection"],
-                        }
-                        
-                        # Aggregate all skills (thread-safe since we're just updating dict)
-                        all_skills.update(skill_book)
-                        problems.append(result["problem"])
-                        
-                        print(f"  Collected {len(skill_book)} skills from {filename}")
-                except Exception as e:
-                    print(f"  Error processing {json_file}: {e}")
+        # Read JSON files sequentially
+        for json_file in json_files:
+            try:
+                with open(json_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                
+                # Extract skill book (client.py uses "behavior_book" key but contains skills)
+                skill_book = data.get("behavior_book", {})
+                if not skill_book:
+                    # Try alternative keys
+                    skill_book = data.get("behaviors", {}) or data.get("skills", {})
+                
+                if skill_book:
+                    filename = Path(json_file).stem
+                    collected_books[filename] = {
+                        "problem": data.get("problem", "Unknown"),
+                        "skill_book": skill_book,
+                        "behavior_book": skill_book,  # Keep for compatibility
+                        "solution": data.get("solution", ""),
+                        "reflection": data.get("reflection", ""),
+                    }
+                    
+                    # Aggregate all skills
+                    all_skills.update(skill_book)
+                    problems.append(data.get("problem", "Unknown"))
+                    
+                    print(f"  Collected {len(skill_book)} skills from {filename}")
+            except Exception as e:
+                print(f"  Warning: Failed to read {json_file}: {e}")
+                continue
         
         # Create aggregated skill store
         self.skill_store = all_skills
@@ -762,7 +729,6 @@ Output ONLY the JSON object, nothing else.
         self, 
         json_files: Optional[List[str]] = None,
         incremental: bool = False,
-        max_workers: Optional[int] = None
     ) -> Dict:
         """
         Main method to aggregate skill books and build the Encyclopedia.
@@ -770,16 +736,15 @@ Output ONLY the JSON object, nothing else.
         Args:
             json_files: List of JSON file paths. If None, scans input_dir.
             incremental: If True, processes files incrementally. If False, processes all at once.
-            max_workers: Maximum number of parallel workers for reading JSON files.
         
         Returns:
             Dictionary containing all aggregation steps and final encyclopedia.
         """
-        # Step 1: Collect Skill Books (in parallel)
+        # Step 1: Collect Skill Books
         print("\n" + "="*80)
-        print("STEP 1: Collecting Skill Books (Parallel)")
+        print("STEP 1: Collecting Skill Books")
         print("="*80)
-        collection_result = self.collect_skill_books(json_files, max_workers=max_workers)
+        collection_result = self.collect_skill_books(json_files)
         time.sleep(1)
 
         if not self.skill_store:
@@ -908,7 +873,6 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-w",
-        "--workers",
         type=int,
         default=None,
         help="Number of parallel workers for reading JSON files (default: min(8, num_files))",
@@ -924,10 +888,9 @@ if __name__ == "__main__":
     )
 
     try:
-        # Run aggregation pipeline with parallel processing
+        # Run aggregation pipeline
         result = server.aggregate_and_build_encyclopedia(
-            json_files=args.files,
-            max_workers=args.workers
+            json_files=args.files
         )
         
         # Save results
