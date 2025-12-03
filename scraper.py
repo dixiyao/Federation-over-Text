@@ -28,21 +28,121 @@ class OpenReviewScraper:
         # Create output directory if it doesn't exist
         os.makedirs(output_dir, exist_ok=True)
 
-    def get_paper_list(self, title_filter=None):
+    def _search_papers_by_title(self, title_filter):
         """
-        Fetch the list of notable top 5% papers from ICLR 2023
+        Search for papers by title keyword using OpenReview API.
+        This method searches across ALL papers by fetching all submissions and filtering client-side.
+        This ensures we get all matching papers, not just the first 1000.
+        
+        Args:
+            title_filter (str): Keyword to search for in paper titles (case-insensitive).
+        
+        Returns:
+            list: List of papers matching the title filter.
+        """
+        papers = []
+        api_url = "https://api.openreview.net/notes"
+        
+        # Search across all ICLR 2023 submissions
+        # Use pagination to get all results
+        offset = 0
+        limit = 1000
+        total_searched = 0
+        total_found = 0
+        
+        print(f"Searching for papers with '{title_filter}' in title (case-insensitive)...")
+        print("This may take a while as we search through all ICLR 2023 submissions...")
+        
+        while True:
+            try:
+                params = {
+                    "invitation": "ICLR.cc/2023/Conference/-/Blind_Submission",
+                    "details": "replyCount,invitation,original",
+                    "offset": offset,
+                    "limit": limit,
+                    "sort": "number:asc",
+                }
+                
+                response = self.session.get(api_url, params=params, timeout=60)
+                response.raise_for_status()
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    notes = data.get("notes", [])
+                    
+                    if not notes:
+                        break  # No more papers
+                    
+                    # Filter by title (case-insensitive)
+                    batch_found = 0
+                    for note in notes:
+                        content = note.get("content", {})
+                        title = content.get("title", "")
+                        
+                        # Case-insensitive search - check if keyword appears anywhere in title
+                        if title and title_filter.lower() in title.lower():
+                            papers.append(note)
+                            total_found += 1
+                            batch_found += 1
+                    
+                    total_searched += len(notes)
+                    
+                    # Progress update
+                    if batch_found > 0:
+                        print(f"  Searched {total_searched} papers, found {total_found} matching (latest batch: {batch_found})...")
+                    elif total_searched % 5000 == 0:
+                        print(f"  Searched {total_searched} papers, found {total_found} matching so far...")
+                    
+                    # Check if we got fewer results than limit (last page)
+                    if len(notes) < limit:
+                        break
+                    
+                    offset += limit
+                    time.sleep(0.5)  # Rate limiting between API calls
+                else:
+                    print(f"API returned status {response.status_code}, stopping pagination")
+                    break
+                    
+            except requests.exceptions.RequestException as e:
+                print(f"Error during search pagination: {e}")
+                print(f"  Found {total_found} papers so far before error")
+                break
+            except Exception as e:
+                print(f"Unexpected error during search: {e}")
+                print(f"  Found {total_found} papers so far before error")
+                break
+        
+        print(f"\nSearch complete: Found {len(papers)} papers matching '{title_filter}' in title (searched {total_searched} total papers)")
+        return papers
+
+    def get_paper_list(self, title_filter=None, top5=False, top25=False, poster=False):
+        """
+        Fetch the list of papers from ICLR 2023
         
         Args:
             title_filter (str, optional): Filter papers by keyword in title (case-insensitive).
-                                         If provided, only papers with this keyword in title will be included.
+                                         If provided, searches across ALL papers, not just notable ones.
+            top5 (bool): If True, only get notable top 5% papers
+            top25 (bool): If True, only get notable top 25% papers  
+            poster (bool): If True, only get poster papers
         """
+        # If title filter is provided, use search API to get ALL matching papers
+        if title_filter:
+            papers = self._search_papers_by_title(title_filter)
+            if papers:
+                return papers
+            # If search API doesn't work, fall back to web scraping
+            print("Search API didn't return results, trying web scraping...")
+            return self._scrape_web_page(title_filter=title_filter, top5=top5, top25=top25, poster=poster)
+        
+        # If no title filter, use the original method
         # Try to get papers via API endpoint
         api_url = "https://api.openreview.net/notes"
         params = {
             "invitation": "ICLR.cc/2023/Conference/-/Blind_Submission",
             "details": "replyCount,invitation,original",
             "offset": 0,
-            "limit": 1000,
+            "limit": 50000,
             "sort": "number:asc",
         }
 
@@ -55,65 +155,37 @@ class OpenReviewScraper:
                 data = response.json()
                 notes = data.get("notes", [])
 
-                # Filter for notable top 5% papers
+                # Filter for notable papers based on flags
                 for note in notes:
-                    # Check if paper is in notable top 5%
-                    # The venue information might be in different places
                     content = note.get("content", {})
                     venue = content.get("venue", "")
                     title = content.get("title", "")
                     
-                    # Check various possible venue formats
-                    if (
-                        venue == "ICLR 2023 Notable Top 5%"
-                        or "Notable Top 5%" in venue
-                        or "Notable" in venue and "Top 5%" in venue
-                    ):
-                        # Apply title filter if specified
-                        if title_filter:
-                            if title_filter.lower() in title.lower():
-                                papers.append(note)
-                        else:
-                            papers.append(note)
-                    # Alternative: check for specific tags or fields
-                    elif "notable" in str(content).lower() and "top" in str(content).lower():
-                        # Apply title filter if specified
-                        if title_filter:
-                            if title_filter.lower() in title.lower():
-                                papers.append(note)
-                        else:
-                            papers.append(note)
-
-                # If no notable papers found, get all and filter by acceptance
-                if not papers:
-                    print(
-                        "No notable papers found via API, trying alternative method..."
-                    )
-                    # Get all accepted papers and check venue field
-                    for note in notes:
-                        content = note.get("content", {})
-                        venue = content.get("venue", "")
-                        title = content.get("title", "")
-                        if "ICLR 2023" in venue and (
-                            "Notable" in venue or "Top 5%" in venue
-                        ):
-                            # Apply title filter if specified
-                            if title_filter:
-                                if title_filter.lower() in title.lower():
-                                    papers.append(note)
-                            else:
-                                papers.append(note)
+                    # Check venue based on flags
+                    should_include = False
+                    if top5 and ("Notable Top 5%" in venue or "Notable" in venue and "Top 5%" in venue):
+                        should_include = True
+                    elif top25 and ("Notable Top 25%" in venue or ("Notable" in venue and "Top 25%" in venue)):
+                        should_include = True
+                    elif poster and ("Poster" in venue or "ICLR 2023" in venue):
+                        should_include = True
+                    elif not top5 and not top25 and not poster:
+                        # Default: get notable top 5%
+                        if ("Notable Top 5%" in venue or ("Notable" in venue and "Top 5%" in venue)):
+                            should_include = True
+                    
+                    if should_include:
+                        papers.append(note)
                 
-                filter_msg = f" (filtered by '{title_filter}' in title)" if title_filter else ""
-                print(f"Found {len(papers)} notable papers via API{filter_msg}")
+                print(f"Found {len(papers)} papers via API")
         except requests.exceptions.RequestException as e:
             print(f"API method failed: {e}")
             print("Trying web scraping method...")
-            papers = self._scrape_web_page(title_filter=title_filter, top5=False, top25=False, poster=False)
+            papers = self._scrape_web_page(title_filter=title_filter, top5=top5, top25=top25, poster=poster)
         except Exception as e:
             print(f"Unexpected error in API call: {e}")
             print("Trying web scraping method...")
-            papers = self._scrape_web_page(title_filter=title_filter, top5=False, top25=False, poster=False)
+            papers = self._scrape_web_page(title_filter=title_filter, top5=top5, top25=top25, poster=poster)
 
         return papers
 
@@ -267,10 +339,10 @@ class OpenReviewScraper:
         """
         print("Fetching paper list...")
         if title_filter:
-            print(f"Filtering papers with '{title_filter}' in title...")
+            print(f"Searching for papers with '{title_filter}' in title (case-insensitive)...")
         
         # Try API first, then fall back to web scraping with specified flags
-        papers = self.get_paper_list(title_filter=title_filter)
+        papers = self.get_paper_list(title_filter=title_filter, top5=top5, top25=top25, poster=poster)
         
         # If API doesn't work or returns no papers, try web scraping
         if not papers:
