@@ -179,8 +179,7 @@ class ChainOfThoughtReader:
             # Ensure max_new_tokens is larger than input tokens
             # For large inputs, we want at least 1.5x the input tokens for generation
             # Cap at 32768 (32k) to avoid memory issues while still allowing substantial output
-            max_new_tokens = max(int(input_token_count * 1.5), 4096)
-            max_new_tokens = min(max_new_tokens, 32768)  # Cap at 32k tokens
+            max_new_tokens = 32768  # Cap at 32k tokens
             
             print(f"Input tokens: {input_token_count}, Max new tokens: {max_new_tokens}")
             
