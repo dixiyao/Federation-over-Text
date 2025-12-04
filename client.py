@@ -192,7 +192,7 @@ class ChainOfThoughtReader:
                     temperature=0.7,
                     do_sample=True,
                     top_p=0.9,
-                    repetition_penalty=1.1,  # Penalize repetition to avoid loops
+                    repetition_penalty=1.8,  # Penalize repetition to avoid loops
                     pad_token_id=self.tokenizer.eos_token_id,
                 )
             
