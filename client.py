@@ -20,7 +20,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 class ChainOfThoughtReader:
     """
-    A client that reads papers using behavior curation pipeline based on 
+    A client that reads papers using behavior curation pipeline based on
     "Metacognitive Reuse: Turning Recurring LLM Reasoning Into Concise Behaviors"
     Implements three-stage pipeline: Solution → Reflection → Behavior Extraction
     """
@@ -40,60 +40,58 @@ class ChainOfThoughtReader:
             or "Analyze this paper and identify key contributions, limitations, and potential future research directions."
         )
         self.behavior_book = {}  # Store extracted behaviors
-        
+
         # Model and tokenizer will be loaded lazily on first use
         self.model = None
         self.tokenizer = None
         self.device = device or ("cuda" if self._check_cuda() else "cpu")
-        
+
     def _check_cuda(self) -> bool:
         """Check if CUDA is available"""
         try:
             return torch.cuda.is_available()
         except ImportError:
             return False
-    
+
     def _load_model(self):
         """Lazy load the Hugging Face model and tokenizer"""
         if self.model is not None and self.tokenizer is not None:
             return
-        
+
         try:
             print(f"Loading model: {self.model_name}")
             print(f"Device: {self.device}")
-            
+
             # Load tokenizer
             self.tokenizer = AutoTokenizer.from_pretrained(
-                self.model_name,
-                trust_remote_code=True
+                self.model_name, trust_remote_code=True
             )
-            
+
             # Load model
             # Use torch_dtype instead of dtype for from_pretrained
             model_kwargs = {
                 "trust_remote_code": True,
             }
-            
+
             if self.device == "cuda":
                 model_kwargs["torch_dtype"] = torch.float16
                 model_kwargs["device_map"] = "auto"
             else:
                 model_kwargs["torch_dtype"] = torch.float32
-            
+
             self.model = AutoModelForCausalLM.from_pretrained(
-                self.model_name,
-                **model_kwargs
+                self.model_name, **model_kwargs
             )
-            
+
             if self.device == "cpu":
                 self.model = self.model.to(self.device)
-            
+
             # Set pad token if not present
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
-            
+
             print("Model loaded successfully!")
-            
+
         except ImportError:
             raise ImportError(
                 "transformers and torch are required. Install with: pip install transformers torch"
@@ -117,51 +115,51 @@ class ChainOfThoughtReader:
         except Exception as e:
             print(f"Error reading PDF: {e}")
             return ""
-    
+
     def _get_pdf_files(self, directory: str, max_papers: Optional[int] = None) -> list:
         """Get list of PDF files from a directory"""
         pdf_files = []
         dir_path = Path(directory)
-        
+
         if not dir_path.exists():
             print(f"Warning: Directory {directory} does not exist")
             return pdf_files
-        
+
         # Find all PDF files
         for pdf_file in dir_path.glob("*.pdf"):
             pdf_files.append(str(pdf_file))
-        
+
         # Sort for consistent ordering
         pdf_files.sort()
-        
+
         # Limit number of papers if specified
         if max_papers is not None and max_papers > 0:
             pdf_files = pdf_files[:max_papers]
-        
+
         return pdf_files
 
     def _call_model(self, prompt: str, system_prompt: Optional[str] = None) -> str:
         """
         Call the Hugging Face language model.
-        
+
         Args:
             prompt: The user prompt
             system_prompt: Optional system prompt (will be prepended if provided)
-        
+
         Returns:
             Generated text response
         """
         # Load model if not already loaded
         self._load_model()
-        
+
         # Combine system prompt and user prompt
         if system_prompt:
             full_prompt = f"{system_prompt}\n\n{prompt}"
         else:
             full_prompt = prompt
-        
+
         try:
-            
+
             # Tokenize input
             # For papers with ~80k characters, we need ~20-30k tokens
             # DeepSeek-R1 supports large context windows (64k+ tokens)
@@ -172,17 +170,19 @@ class ChainOfThoughtReader:
                 truncation=True,
                 max_length=65536,  # 64k tokens - enough for papers up to ~200k characters
             ).to(self.device)
-            
+
             # Get input token count
             input_token_count = inputs["input_ids"].shape[1]
-            
+
             # Ensure max_new_tokens is larger than input tokens
             # For large inputs, we want at least 1.5x the input tokens for generation
             # Cap at 32768 (32k) to avoid memory issues while still allowing substantial output
             max_new_tokens = 32768  # Cap at 32k tokens
-            
-            print(f"Input tokens: {input_token_count}, Max new tokens: {max_new_tokens}")
-            
+
+            print(
+                f"Input tokens: {input_token_count}, Max new tokens: {max_new_tokens}"
+            )
+
             # Generate response
             with torch.no_grad():
                 outputs = self.model.generate(
@@ -194,15 +194,14 @@ class ChainOfThoughtReader:
                     repetition_penalty=1.8,  # Penalize repetition to avoid loops
                     pad_token_id=self.tokenizer.eos_token_id,
                 )
-            
+
             # Decode response
             generated_text = self.tokenizer.decode(
-                outputs[0][inputs["input_ids"].shape[1]:], 
-                skip_special_tokens=True
+                outputs[0][inputs["input_ids"].shape[1] :], skip_special_tokens=True
             )
-            
+
             return generated_text.strip()
-            
+
         except Exception as e:
             print(f"Error calling model: {e}")
             return f"[Error] Model generation failed: {str(e)}"
@@ -277,16 +276,14 @@ Example format:
 }}
 """
         prompt = prompt_template.format(
-            problem=problem,
-            solution=solution,
-            reflection=reflection
+            problem=problem, solution=solution, reflection=reflection
         )
         return prompt
 
     def _step_solution(self, problem: str) -> Dict:
         """Step 1: Generate solution using Solution Prompt"""
         prompt = self._get_solution_prompt(problem)
-        
+
         system_prompt = None
         response = self._call_model(prompt, system_prompt)
         print(f"Solution Response: {response}")
@@ -305,7 +302,7 @@ Example format:
     def _step_reflection(self, problem: str, solution: str) -> Dict:
         """Step 2: Generate reflection using Reflection Prompt"""
         prompt = self._get_reflection_prompt(problem, solution)
-        
+
         system_prompt = None
         response = self._call_model(prompt, system_prompt)
         print(f"Reflection Response: {response}")
@@ -321,10 +318,12 @@ Example format:
         self.reasoning_steps.append(step_result)
         return step_result
 
-    def _step_behavior_extraction(self, problem: str, solution: str, reflection: str) -> Dict:
+    def _step_behavior_extraction(
+        self, problem: str, solution: str, reflection: str
+    ) -> Dict:
         """Step 3: Extract behaviors using Behavior Prompt"""
         prompt = self._get_behavior_prompt(problem, solution, reflection)
-        
+
         system_prompt = None
         response = self._call_model(prompt, system_prompt)
         print(f"Behavior Extraction Response: {response}")
@@ -332,25 +331,27 @@ Example format:
         # Try to parse behaviors from JSON response
         behaviors = {}
         formatted_json_array = None  # Store the original formatted JSON array
-        
+
         try:
             # First, try to extract JSON from markdown code blocks (```json ... ```)
-            json_code_block = re.search(r'```(?:json)?\s*(\[.*?\]|\{.*?\})\s*```', response, re.DOTALL)
+            json_code_block = re.search(
+                r"```(?:json)?\s*(\[.*?\]|\{.*?\})\s*```", response, re.DOTALL
+            )
             if json_code_block:
                 json_str = json_code_block.group(1)
             else:
                 # Try to find JSON array [...]
-                json_array_match = re.search(r'\[[\s\S]*?\]', response)
+                json_array_match = re.search(r"\[[\s\S]*?\]", response)
                 if json_array_match:
                     json_str = json_array_match.group(0)
                 else:
                     # Try to find JSON object {...}
-                    json_object_match = re.search(r'\{[\s\S]*?\}', response)
+                    json_object_match = re.search(r"\{[\s\S]*?\}", response)
                     if json_object_match:
                         json_str = json_object_match.group(0)
                     else:
                         json_str = None
-            
+
             if json_str:
                 try:
                     json_data = json.loads(json_str)
@@ -371,28 +372,32 @@ Example format:
                                     behaviors.update(item)
                     elif isinstance(json_data, dict):
                         behaviors = json_data
-                    
+
                     if behaviors:
                         self.behavior_book.update(behaviors)
                 except json.JSONDecodeError as e:
                     print(f"Warning: JSON decode error: {e}")
-            
+
             # If still no behaviors, try manual extraction
             if not behaviors:
-                print("Warning: Could not parse JSON from behavior extraction. Attempting manual extraction.")
+                print(
+                    "Warning: Could not parse JSON from behavior extraction. Attempting manual extraction."
+                )
                 # Try to extract behaviors manually (look for behavior_* patterns)
-                behavior_pattern = r'["\']?(behavior_\w+)["\']?\s*[:=]\s*["\']?([^"\']+)["\']?'
+                behavior_pattern = (
+                    r'["\']?(behavior_\w+)["\']?\s*[:=]\s*["\']?([^"\']+)["\']?'
+                )
                 matches = re.findall(behavior_pattern, response)
                 for name, desc in matches:
                     behaviors[name] = desc.strip()
                 if behaviors:
                     self.behavior_book.update(behaviors)
-                
+
         except Exception as e:
             print(f"Warning: Error parsing behaviors: {e}. Storing raw response.")
             if not behaviors:
                 behaviors = {"raw_response": response}
-        
+
         step_result = {
             "step": 3,
             "name": "Behavior Extraction",
@@ -475,110 +480,110 @@ Please answer the user's question based on the paper content provided above."""
         }
 
         return result
-    
+
     def process_multiple_papers(
-        self, 
-        question: str, 
+        self,
+        question: str,
         papers_dir: Optional[str] = None,
-        num_papers: Optional[int] = None
+        num_papers: Optional[int] = None,
     ) -> list:
         """
         Process multiple papers with a given question sequentially.
         Each paper will generate its own behavior book.
-        
+
         Args:
             question: The user-provided question to answer for each paper
             papers_dir: Directory containing PDF papers. If None, uses self.papers_dir
             num_papers: Number of papers to process. If None, processes all papers.
-        
+
         Returns:
             List of results, one for each paper processed
         """
         # Use provided directory or default
         directory = papers_dir or self.papers_dir
-        
+
         # Get list of PDF files
         pdf_files = self._get_pdf_files(directory, num_papers)
-        
+
         if not pdf_files:
             print(f"No PDF files found in {directory}")
             return []
-        
+
         print(f"Found {len(pdf_files)} PDF file(s) to process")
         print(f"Question: {question}\n")
         print("=" * 80)
-        
+
         all_results = []
         output_dir = Path("output")
         output_dir.mkdir(exist_ok=True)
-        
+
         # Process papers sequentially
         for idx, pdf_path in enumerate(pdf_files, 1):
             paper_name = Path(pdf_path).stem
             print(f"\n{'='*80}")
             print(f"Processing Paper {idx}/{len(pdf_files)}: {paper_name}")
             print(f"{'='*80}\n")
-            
+
             try:
                 # Extract text from PDF
                 print(f"Extracting text from {paper_name}...")
                 paper_content = self._extract_text_from_pdf(pdf_path)
-                
+
                 if not paper_content:
-                    print(f"Warning: Could not extract text from {pdf_path}. Skipping...")
+                    print(
+                        f"Warning: Could not extract text from {pdf_path}. Skipping..."
+                    )
                     continue
-                
+
                 print(f"Extracted {len(paper_content)} characters from paper\n")
-                
+
                 # Process this paper with the question
                 result = self.read_paper(task=question, paper_content=paper_content)
-                
+
                 # Add paper metadata to result
                 result["paper_path"] = pdf_path
                 result["paper_name"] = paper_name
                 result["paper_index"] = idx
-                
+
                 # Get the formatted JSON array from the behavior extraction step
                 formatted_json = None
                 for step in result.get("reasoning_steps", []):
                     if step.get("step") == 3 and "formatted_json_array" in step:
                         formatted_json = step.get("formatted_json_array")
                         break
-                
+
                 # If no formatted JSON array found, fall back to behavior_book format
                 if formatted_json is None:
                     formatted_json = [
-                        {
-                            "behavior": name.replace("behavior_", ""),
-                            "description": desc
-                        }
+                        {"behavior": name.replace("behavior_", ""), "description": desc}
                         for name, desc in result.get("behavior_book", {}).items()
                     ]
-                
+
                 # Save JSON
                 output_data = {
                     "file_number": idx,
                     "paper_name": paper_name,
-                    "behaviors": formatted_json
+                    "behaviors": formatted_json,
                 }
-                
+
                 output_path = output_dir / f"paper_{idx:02d}.json"
                 with open(output_path, "w", encoding="utf-8") as f:
                     json.dump(output_data, f, indent=2, ensure_ascii=False)
-                
+
                 print(f"Saved behavior book to: {output_path}")
                 print(f"\nCompleted paper {idx}/{len(pdf_files)}: {paper_name}")
                 print(f"Behaviors extracted: {len(result.get('behavior_book', {}))}")
                 print("-" * 80)
-                
+
                 all_results.append(result)
-                
+
             except Exception as e:
                 print(f"Error processing {paper_name}: {e}")
                 import traceback
+
                 traceback.print_exc()
                 continue
-        
+
         # Save summary
         summary = {
             "total_papers": len(all_results),
@@ -587,23 +592,25 @@ Please answer the user's question based on the paper content provided above."""
                     "paper_index": r.get("paper_index", 0),
                     "paper_name": r.get("paper_name", "Unknown"),
                     "paper_path": r.get("paper_path", ""),
-                    "behavior_book": r.get("behavior_book", {})
+                    "behavior_book": r.get("behavior_book", {}),
                 }
                 for r in all_results
             ],
-            "total_behaviors": sum(len(r.get("behavior_book", {})) for r in all_results)
+            "total_behaviors": sum(
+                len(r.get("behavior_book", {})) for r in all_results
+            ),
         }
-        
+
         summary_path = output_dir / "summary.json"
         with open(summary_path, "w", encoding="utf-8") as f:
             json.dump(summary, f, indent=2, ensure_ascii=False)
-        
+
         print(f"\n{'='*80}")
         print(f"Completed processing {len(all_results)}/{len(pdf_files)} papers")
         print(f"Total behaviors extracted: {summary['total_behaviors']}")
         print(f"Summary saved to: {summary_path}")
         print(f"{'='*80}")
-        
+
         return all_results
 
     def _format_complete_reasoning(self) -> str:
@@ -621,8 +628,10 @@ Please answer the user's question based on the paper content provided above."""
         """Save the complete reasoning process and behavior book to files"""
         if output_path is None:
             # Create a safe filename from the problem/question
-            safe_name = re.sub(r'[^\w\s-]', '', reasoning_result.get('problem', 'reasoning')[:50])
-            safe_name = re.sub(r'[-\s]+', '_', safe_name)
+            safe_name = re.sub(
+                r"[^\w\s-]", "", reasoning_result.get("problem", "reasoning")[:50]
+            )
+            safe_name = re.sub(r"[-\s]+", "_", safe_name)
             output_path = f"reasoning_{safe_name}.txt"
 
         with open(output_path, "w", encoding="utf-8") as f:
@@ -634,7 +643,9 @@ Please answer the user's question based on the paper content provided above."""
             f.write(f"\n\n{'='*80}\n")
             f.write("BEHAVIOR BOOK\n")
             f.write(f"{'='*80}\n\n")
-            for behavior_name, behavior_desc in reasoning_result.get("behavior_book", {}).items():
+            for behavior_name, behavior_desc in reasoning_result.get(
+                "behavior_book", {}
+            ).items():
                 f.write(f"{behavior_name}: {behavior_desc}\n")
 
         # Also save as JSON for structured access
@@ -645,7 +656,12 @@ Please answer the user's question based on the paper content provided above."""
         # Save behavior book separately as JSON
         behavior_book_path = output_path.replace(".txt", "_behavior_book.json")
         with open(behavior_book_path, "w", encoding="utf-8") as f:
-            json.dump(reasoning_result.get("behavior_book", {}), f, indent=2, ensure_ascii=False)
+            json.dump(
+                reasoning_result.get("behavior_book", {}),
+                f,
+                indent=2,
+                ensure_ascii=False,
+            )
 
         print("\nResults saved to:")
         print(f"  - {output_path}")
@@ -702,10 +718,10 @@ if __name__ == "__main__":
 
     # Example usage
     reader = ChainOfThoughtReader(
-        model_name=args.model, 
+        model_name=args.model,
         task=args.task,
         device=args.device,
-        papers_dir=args.papers_dir
+        papers_dir=args.papers_dir,
     )
 
     try:
@@ -713,7 +729,7 @@ if __name__ == "__main__":
             print("Error: Please provide a problem/question using -t or --task")
             print("Example: python client.py -t 'What are the key contributions?' -n 5")
             exit(1)
-        
+
         # If --single flag is set or no papers directory specified, use legacy single mode
         if args.single or (args.papers_dir is None and args.num_papers is None):
             result = reader.read_paper(task=args.task)
@@ -733,9 +749,9 @@ if __name__ == "__main__":
             results = reader.process_multiple_papers(
                 question=args.task,
                 papers_dir=args.papers_dir,
-                num_papers=args.num_papers
+                num_papers=args.num_papers,
             )
-            
+
             # Print summary of all behavior books
             print("\n" + "=" * 80)
             print("ALL BEHAVIOR BOOKS SUMMARY")
@@ -743,14 +759,19 @@ if __name__ == "__main__":
             for idx, result in enumerate(results, 1):
                 print(f"\nPaper {idx}: {result['paper_name']}")
                 print(f"  Behaviors: {len(result.get('behavior_book', {}))}")
-                for behavior_name, behavior_desc in list(result.get("behavior_book", {}).items())[:3]:
+                for behavior_name, behavior_desc in list(
+                    result.get("behavior_book", {}).items()
+                )[:3]:
                     print(f"    - {behavior_name}: {behavior_desc[:100]}...")
-                if len(result.get('behavior_book', {})) > 3:
-                    print(f"    ... and {len(result.get('behavior_book', {})) - 3} more")
-            
+                if len(result.get("behavior_book", {})) > 3:
+                    print(
+                        f"    ... and {len(result.get('behavior_book', {})) - 3} more"
+                    )
+
     except Exception as e:
         print(f"Error: {e}")
         import traceback
+
         traceback.print_exc()
         print("\nMake sure you have:")
         print("1. Installed required packages: pip install -r requirements.txt")
@@ -758,6 +779,10 @@ if __name__ == "__main__":
         print("\nExample usage:")
         print("  # Process multiple papers:")
         print("  python client.py -t 'What are the key contributions?' -n 5")
-        print("  python client.py -t 'Analyze this paper' -p data/papers/iclr23_top5 -n 10")
+        print(
+            "  python client.py -t 'Analyze this paper' -p data/papers/iclr23_top5 -n 10"
+        )
         print("  # Single question mode:")
-        print("  python client.py -t 'Find the area of a circle with radius 4' --single")
+        print(
+            "  python client.py -t 'Find the area of a circle with radius 4' --single"
+        )

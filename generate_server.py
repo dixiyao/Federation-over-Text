@@ -22,59 +22,57 @@ class GenerateServer:
     ):
         self.model_name = model_name
         self.encyclopedia = ""
-        
+
         # Model and tokenizer will be loaded lazily on first use
         self.model = None
         self.tokenizer = None
         self.device = device or ("cuda" if self._check_cuda() else "cpu")
-        
+
     def _check_cuda(self) -> bool:
         """Check if CUDA is available"""
         try:
             return torch.cuda.is_available()
         except ImportError:
             return False
-    
+
     def _load_model(self):
         """Lazy load the Hugging Face model and tokenizer"""
         if self.model is not None and self.tokenizer is not None:
             return
-        
+
         try:
             print(f"Loading model: {self.model_name}")
             print(f"Device: {self.device}")
-            
+
             # Load tokenizer
             self.tokenizer = AutoTokenizer.from_pretrained(
-                self.model_name,
-                trust_remote_code=True
+                self.model_name, trust_remote_code=True
             )
-            
+
             # Load model
             model_kwargs = {
                 "trust_remote_code": True,
             }
-            
+
             if self.device == "cuda":
                 model_kwargs["torch_dtype"] = torch.float16
                 model_kwargs["device_map"] = "auto"
             else:
                 model_kwargs["torch_dtype"] = torch.float32
-            
+
             self.model = AutoModelForCausalLM.from_pretrained(
-                self.model_name,
-                **model_kwargs
+                self.model_name, **model_kwargs
             )
-            
+
             if self.device == "cpu":
                 self.model = self.model.to(self.device)
-            
+
             # Set pad token if not present
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
-            
+
             print("Model loaded successfully!")
-            
+
         except ImportError:
             raise ImportError(
                 "transformers and torch are required. Install with: pip install transformers torch"
@@ -87,9 +85,13 @@ class GenerateServer:
         try:
             with open(encyclopedia_path, "r", encoding="utf-8") as f:
                 self.encyclopedia = f.read().strip()
-            print(f"Loaded encyclopedia from {encyclopedia_path} ({len(self.encyclopedia)} characters)")
+            print(
+                f"Loaded encyclopedia from {encyclopedia_path} ({len(self.encyclopedia)} characters)"
+            )
         except Exception as e:
-            raise FileNotFoundError(f"Failed to load encyclopedia from {encyclopedia_path}: {e}")
+            raise FileNotFoundError(
+                f"Failed to load encyclopedia from {encyclopedia_path}: {e}"
+            )
 
     def _get_generation_prompt(self, query: str) -> str:
         """Get the prompt for generating an answer using the encyclopedia"""
@@ -112,22 +114,22 @@ You should finally include a field starting with "## Answer:" and ending with "#
     def generate(self, query: str) -> str:
         """
         Generate an answer to a query using the encyclopedia.
-        
+
         Args:
             query: The question or query to answer
-        
+
         Returns:
             Generated answer text
         """
         if not self.encyclopedia:
             raise ValueError("Encyclopedia not loaded. Call load_encyclopedia() first.")
-        
+
         # Load model if not already loaded
         self._load_model()
-        
+
         # Get the prompt
         prompt = self._get_generation_prompt(query)
-        
+
         try:
             # Tokenize input
             inputs = self.tokenizer(
@@ -136,14 +138,16 @@ You should finally include a field starting with "## Answer:" and ending with "#
                 truncation=True,
                 max_length=65536,  # Large limit for encyclopedia content
             ).to(self.device)
-            
+
             # Calculate input token count for dynamic output sizing
             input_token_count = inputs["input_ids"].shape[1]
-            
-            max_new_tokens = 98304 # ~70k words
-            
-            print(f"Input tokens: {input_token_count}, Max new tokens: {max_new_tokens}")
-            
+
+            max_new_tokens = 98304  # ~70k words
+
+            print(
+                f"Input tokens: {input_token_count}, Max new tokens: {max_new_tokens}"
+            )
+
             with torch.no_grad():
                 outputs = self.model.generate(
                     **inputs,
@@ -154,15 +158,14 @@ You should finally include a field starting with "## Answer:" and ending with "#
                     repetition_penalty=1.1,
                     pad_token_id=self.tokenizer.eos_token_id,
                 )
-            
+
             # Decode response
             generated_text = self.tokenizer.decode(
-                outputs[0][inputs["input_ids"].shape[1]:], 
-                skip_special_tokens=True
+                outputs[0][inputs["input_ids"].shape[1] :], skip_special_tokens=True
             )
-            
+
             return generated_text.strip()
-            
+
         except Exception as e:
             print(f"Error generating response: {e}")
             return f"[Error] Generation failed: {str(e)}"
@@ -219,37 +222,41 @@ if __name__ == "__main__":
     try:
         # Load encyclopedia
         server.load_encyclopedia(args.encyclopedia)
-        
+
         # Generate answer
         print(f"\nQuery: {args.query}\n")
         print("Generating answer...")
         answer = server.generate(args.query)
-        
+
         # Print answer
-        print("\n" + "="*80)
+        print("\n" + "=" * 80)
         print("ANSWER")
-        print("="*80)
+        print("=" * 80)
         print(answer)
-        
+
         # Save to file if requested
         if args.output:
             with open(args.output, "w", encoding="utf-8") as f:
                 f.write(f"Query: {args.query}\n\n")
-                f.write("="*80 + "\n")
+                f.write("=" * 80 + "\n")
                 f.write("ANSWER\n")
-                f.write("="*80 + "\n\n")
+                f.write("=" * 80 + "\n\n")
                 f.write(answer)
             print(f"\nAnswer saved to: {args.output}")
-        
+
     except Exception as e:
         print(f"Error: {e}")
         import traceback
+
         traceback.print_exc()
         print("\nMake sure you have:")
         print("1. Generated the encyclopedia using server.py")
         print("2. Installed required packages: pip install -r requirements.txt")
         print("3. For GPU support, ensure CUDA is properly installed")
         print("\nExample usage:")
-        print("  python generate_server.py -e build/log/encyclopedia.txt -q 'How do I solve quadratic equations?'")
-        print("  python generate_server.py -e build/log/encyclopedia.txt -q 'What skills are available for pattern matching?' -o answer.txt")
-
+        print(
+            "  python generate_server.py -e build/log/encyclopedia.txt -q 'How do I solve quadratic equations?'"
+        )
+        print(
+            "  python generate_server.py -e build/log/encyclopedia.txt -q 'What skills are available for pattern matching?' -o answer.txt"
+        )

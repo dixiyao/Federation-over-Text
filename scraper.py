@@ -33,26 +33,28 @@ class OpenReviewScraper:
         Search for papers by title keyword using OpenReview API.
         This method searches across ALL papers by fetching all submissions and filtering client-side.
         This ensures we get all matching papers, not just the first 1000.
-        
+
         Args:
             title_filter (str): Keyword to search for in paper titles (case-insensitive).
-        
+
         Returns:
             list: List of papers matching the title filter.
         """
         papers = []
         api_url = "https://api.openreview.net/notes"
-        
+
         # Search across all ICLR 2023 submissions
         # Use pagination to get all results
         offset = 0
         limit = 1000
         total_searched = 0
         total_found = 0
-        
-        print(f"Searching for papers with '{title_filter}' in title (case-insensitive)...")
+
+        print(
+            f"Searching for papers with '{title_filter}' in title (case-insensitive)..."
+        )
         print("This may take a while as we search through all ICLR 2023 submissions...")
-        
+
         while True:
             try:
                 params = {
@@ -62,47 +64,53 @@ class OpenReviewScraper:
                     "limit": limit,
                     "sort": "number:asc",
                 }
-                
+
                 response = self.session.get(api_url, params=params, timeout=60)
                 response.raise_for_status()
-                
+
                 if response.status_code == 200:
                     data = response.json()
                     notes = data.get("notes", [])
-                    
+
                     if not notes:
                         break  # No more papers
-                    
+
                     # Filter by title (case-insensitive)
                     batch_found = 0
                     for note in notes:
                         content = note.get("content", {})
                         title = content.get("title", "")
-                        
+
                         # Case-insensitive search - check if keyword appears anywhere in title
                         if title and title_filter.lower() in title.lower():
                             papers.append(note)
                             total_found += 1
                             batch_found += 1
-                    
+
                     total_searched += len(notes)
-                    
+
                     # Progress update
                     if batch_found > 0:
-                        print(f"  Searched {total_searched} papers, found {total_found} matching (latest batch: {batch_found})...")
+                        print(
+                            f"  Searched {total_searched} papers, found {total_found} matching (latest batch: {batch_found})..."
+                        )
                     elif total_searched % 5000 == 0:
-                        print(f"  Searched {total_searched} papers, found {total_found} matching so far...")
-                    
+                        print(
+                            f"  Searched {total_searched} papers, found {total_found} matching so far..."
+                        )
+
                     # Check if we got fewer results than limit (last page)
                     if len(notes) < limit:
                         break
-                    
+
                     offset += limit
                     time.sleep(0.5)  # Rate limiting between API calls
                 else:
-                    print(f"API returned status {response.status_code}, stopping pagination")
+                    print(
+                        f"API returned status {response.status_code}, stopping pagination"
+                    )
                     break
-                    
+
             except requests.exceptions.RequestException as e:
                 print(f"Error during search pagination: {e}")
                 print(f"  Found {total_found} papers so far before error")
@@ -111,19 +119,21 @@ class OpenReviewScraper:
                 print(f"Unexpected error during search: {e}")
                 print(f"  Found {total_found} papers so far before error")
                 break
-        
-        print(f"\nSearch complete: Found {len(papers)} papers matching '{title_filter}' in title (searched {total_searched} total papers)")
+
+        print(
+            f"\nSearch complete: Found {len(papers)} papers matching '{title_filter}' in title (searched {total_searched} total papers)"
+        )
         return papers
 
     def get_paper_list(self, title_filter=None, top5=False, top25=False, poster=False):
         """
         Fetch the list of papers from ICLR 2023
-        
+
         Args:
             title_filter (str, optional): Filter papers by keyword in title (case-insensitive).
                                          If provided, searches across ALL papers, not just notable ones.
             top5 (bool): If True, only get notable top 5% papers
-            top25 (bool): If True, only get notable top 25% papers  
+            top25 (bool): If True, only get notable top 25% papers
             poster (bool): If True, only get poster papers
         """
         # If title filter is provided, use search API to get ALL matching papers
@@ -133,8 +143,10 @@ class OpenReviewScraper:
                 return papers
             # If search API doesn't work, fall back to web scraping
             print("Search API didn't return results, trying web scraping...")
-            return self._scrape_web_page(title_filter=title_filter, top5=top5, top25=top25, poster=poster)
-        
+            return self._scrape_web_page(
+                title_filter=title_filter, top5=top5, top25=top25, poster=poster
+            )
+
         # If no title filter, use the original method
         # Try to get papers via API endpoint
         api_url = "https://api.openreview.net/notes"
@@ -150,7 +162,7 @@ class OpenReviewScraper:
         try:
             response = self.session.get(api_url, params=params, timeout=30)
             response.raise_for_status()
-            
+
             if response.status_code == 200:
                 data = response.json()
                 notes = data.get("notes", [])
@@ -160,39 +172,54 @@ class OpenReviewScraper:
                     content = note.get("content", {})
                     venue = content.get("venue", "")
                     title = content.get("title", "")
-                    
+
                     # Check venue based on flags
                     should_include = False
-                    if top5 and ("Notable Top 5%" in venue or "Notable" in venue and "Top 5%" in venue):
+                    if top5 and (
+                        "Notable Top 5%" in venue
+                        or "Notable" in venue
+                        and "Top 5%" in venue
+                    ):
                         should_include = True
-                    elif top25 and ("Notable Top 25%" in venue or ("Notable" in venue and "Top 25%" in venue)):
+                    elif top25 and (
+                        "Notable Top 25%" in venue
+                        or ("Notable" in venue and "Top 25%" in venue)
+                    ):
                         should_include = True
                     elif poster and ("Poster" in venue or "ICLR 2023" in venue):
                         should_include = True
                     elif not top5 and not top25 and not poster:
                         # Default: get notable top 5%
-                        if ("Notable Top 5%" in venue or ("Notable" in venue and "Top 5%" in venue)):
+                        if "Notable Top 5%" in venue or (
+                            "Notable" in venue and "Top 5%" in venue
+                        ):
                             should_include = True
-                    
+
                     if should_include:
                         papers.append(note)
-                
+
                 print(f"Found {len(papers)} papers via API")
         except requests.exceptions.RequestException as e:
             print(f"API method failed: {e}")
             print("Trying web scraping method...")
-            papers = self._scrape_web_page(title_filter=title_filter, top5=top5, top25=top25, poster=poster)
+            papers = self._scrape_web_page(
+                title_filter=title_filter, top5=top5, top25=top25, poster=poster
+            )
         except Exception as e:
             print(f"Unexpected error in API call: {e}")
             print("Trying web scraping method...")
-            papers = self._scrape_web_page(title_filter=title_filter, top5=top5, top25=top25, poster=poster)
+            papers = self._scrape_web_page(
+                title_filter=title_filter, top5=top5, top25=top25, poster=poster
+            )
 
         return papers
 
-    def _scrape_web_page(self, title_filter=None, top5=False, top25=False, poster=False):
+    def _scrape_web_page(
+        self, title_filter=None, top5=False, top25=False, poster=False
+    ):
         """
         Fallback method: scrape papers from multiple web pages
-        
+
         Args:
             title_filter (str, optional): Filter papers by keyword in title (case-insensitive).
             top5 (bool): If True, scrape from notable top 5% papers
@@ -203,15 +230,30 @@ class OpenReviewScraper:
         # If no flags are set, use all URLs (backward compatibility)
         urls = []
         if top5 or (not top5 and not top25 and not poster):
-            urls.append(("Notable Top 5%", "https://openreview.net/group?id=ICLR.cc/2023/Conference#notable-top-5-"))
+            urls.append(
+                (
+                    "Notable Top 5%",
+                    "https://openreview.net/group?id=ICLR.cc/2023/Conference#notable-top-5-",
+                )
+            )
         if top25 or (not top5 and not top25 and not poster):
-            urls.append(("Notable Top 25%", "https://openreview.net/group?id=ICLR.cc%2F2023%2FConference#notable-top-25-"))
+            urls.append(
+                (
+                    "Notable Top 25%",
+                    "https://openreview.net/group?id=ICLR.cc%2F2023%2FConference#notable-top-25-",
+                )
+            )
         if poster or (not top5 and not top25 and not poster):
-            urls.append(("Poster", "https://openreview.net/group?id=ICLR.cc%2F2023%2FConference#poster"))
-        
+            urls.append(
+                (
+                    "Poster",
+                    "https://openreview.net/group?id=ICLR.cc%2F2023%2FConference#poster",
+                )
+            )
+
         all_papers = []
         seen_paper_ids = set()  # Track seen papers to avoid duplicates
-        
+
         for url_name, url in urls:
             try:
                 print(f"Scraping from {url_name}: {url}")
@@ -237,7 +279,9 @@ class OpenReviewScraper:
                                     {
                                         "id": paper_id,
                                         "title": title,
-                                        "url": urljoin(self.base_url, link.get("href", "")),
+                                        "url": urljoin(
+                                            self.base_url, link.get("href", "")
+                                        ),
                                     }
                                 )
                                 seen_paper_ids.add(paper_id)
@@ -250,14 +294,14 @@ class OpenReviewScraper:
                                 }
                             )
                             seen_paper_ids.add(paper_id)
-                
+
                 print(f"  Found {len(paper_links)} papers from this page")
                 time.sleep(1)  # Rate limiting between pages
-                
+
             except Exception as e:
                 print(f"  Warning: Failed to scrape {url_name} ({url}): {e}")
                 continue
-        
+
         print(f"Total unique papers found: {len(all_papers)}")
         return all_papers
 
@@ -265,11 +309,15 @@ class OpenReviewScraper:
         """Download a paper PDF given paper information"""
         # Try to get paper ID from various possible fields
         # The forum ID is what's used in OpenReview URLs
-        paper_id = paper_info.get("forum") or paper_info.get("id") or paper_info.get("number")
+        paper_id = (
+            paper_info.get("forum") or paper_info.get("id") or paper_info.get("number")
+        )
         if not paper_id:
-            print(f"Error: No paper ID found for paper: {paper_info.get('title', 'Unknown')}")
+            print(
+                f"Error: No paper ID found for paper: {paper_info.get('title', 'Unknown')}"
+            )
             return None
-            
+
         title = paper_info.get("content", {}).get(
             "title", paper_info.get("title", f"paper_{paper_id}")
         )
@@ -288,19 +336,23 @@ class OpenReviewScraper:
         try:
             response = self.session.get(pdf_url, timeout=60, stream=True)
             response.raise_for_status()
-            
+
             # Check if response is actually a PDF
             content_type = response.headers.get("content-type", "")
-            if "pdf" not in content_type.lower() and not content_type.startswith("application/octet-stream"):
+            if "pdf" not in content_type.lower() and not content_type.startswith(
+                "application/octet-stream"
+            ):
                 # Try alternative: check if we got HTML (error page) instead of PDF
                 if response.headers.get("content-type", "").startswith("text/html"):
-                    print(f"Warning: Received HTML instead of PDF for {title}. The paper might not be publicly available.")
+                    print(
+                        f"Warning: Received HTML instead of PDF for {title}. The paper might not be publicly available."
+                    )
                     return None
-            
+
             with open(pdf_path, "wb") as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
-            
+
             # Verify file was written and has content
             if os.path.getsize(pdf_path) > 0:
                 print(f"Downloaded: {title}")
@@ -309,7 +361,7 @@ class OpenReviewScraper:
                 print(f"Error: Downloaded file is empty for {title}")
                 os.remove(pdf_path)
                 return None
-                
+
         except requests.exceptions.HTTPError as e:
             print(f"Failed to download {title}: HTTP {e.response.status_code} - {e}")
             return None
@@ -324,7 +376,9 @@ class OpenReviewScraper:
             json.dump(papers, f, indent=2, ensure_ascii=False)
         print(f"Saved metadata to {metadata_path}")
 
-    def scrape_all(self, max_papers=None, title_filter=None, top5=False, top25=False, poster=False):
+    def scrape_all(
+        self, max_papers=None, title_filter=None, top5=False, top25=False, poster=False
+    ):
         """
         Main method to scrape papers from OpenReview
 
@@ -339,15 +393,21 @@ class OpenReviewScraper:
         """
         print("Fetching paper list...")
         if title_filter:
-            print(f"Searching for papers with '{title_filter}' in title (case-insensitive)...")
-        
+            print(
+                f"Searching for papers with '{title_filter}' in title (case-insensitive)..."
+            )
+
         # Try API first, then fall back to web scraping with specified flags
-        papers = self.get_paper_list(title_filter=title_filter, top5=top5, top25=top25, poster=poster)
-        
+        papers = self.get_paper_list(
+            title_filter=title_filter, top5=top5, top25=top25, poster=poster
+        )
+
         # If API doesn't work or returns no papers, try web scraping
         if not papers:
             print("No papers from API, trying web scraping...")
-            papers = self._scrape_web_page(title_filter=title_filter, top5=top5, top25=top25, poster=poster)
+            papers = self._scrape_web_page(
+                title_filter=title_filter, top5=top5, top25=top25, poster=poster
+            )
 
         if not papers:
             print("No papers found. Please check the URL or API access.")
@@ -424,9 +484,9 @@ if __name__ == "__main__":
 
     scraper = OpenReviewScraper(output_dir=args.output_dir)
     scraper.scrape_all(
-        max_papers=args.num_papers, 
+        max_papers=args.num_papers,
         title_filter=args.filter,
         top5=args.top5,
         top25=args.top25,
-        poster=args.poster
+        poster=args.poster,
     )
