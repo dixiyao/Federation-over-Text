@@ -138,7 +138,7 @@ class ChainOfThoughtReader:
 
         return pdf_files
 
-    def _call_model(self, prompt: str, system_prompt: Optional[str] = None) -> str:
+    def _call_model(self, prompt: str, system_prompt: Optional[str] = None, max_new_tokens: Optional[int] = None) -> str:
         """
         Call the Hugging Face language model.
         
@@ -146,6 +146,7 @@ class ChainOfThoughtReader:
             prompt: The user prompt
             system_prompt: Optional system prompt (will be prepended if provided)
                           NOTE: For DeepSeek-R1 models, avoid system prompts - put all in user prompt
+            max_new_tokens: Maximum number of new tokens to generate. If None, uses default 32768.
         
         Returns:
             Generated text response
@@ -176,10 +177,9 @@ class ChainOfThoughtReader:
             # Get input token count
             input_token_count = inputs["input_ids"].shape[1]
 
-            # Ensure max_new_tokens is larger than input tokens
-            # For large inputs, we want at least 1.5x the input tokens for generation
-            # Cap at 32768 (32k) to avoid memory issues while still allowing substantial output
-            max_new_tokens = 32768  # Cap at 32k tokens
+            # Use provided max_new_tokens or default to 32768
+            if max_new_tokens is None:
+                max_new_tokens = 32768  # Default: 32k tokens
 
             print(
                 f"Input tokens: {input_token_count}, Max new tokens: {max_new_tokens}"
@@ -199,19 +199,19 @@ class ChainOfThoughtReader:
                         do_sample=True,
                         top_p=0.9,
                         temperature=0.7,
-                        repetition_penalty=1.2,
+                        repetition_penalty=1.1,
                         use_cache=True,
                         pad_token_id=self.tokenizer.eos_token_id,
                     )
                 else:
                     # Default settings for other models
                     outputs = self.model.generate(
-                    **inputs,
+                        **inputs,
                         max_new_tokens=max_new_tokens,
                         temperature=0.7,
                         do_sample=True,
                         top_p=0.9,
-                        repetition_penalty=1.8,  # Penalize repetition to avoid loops
+                        repetition_penalty=1.1,  # Penalize repetition to avoid loops
                         pad_token_id=self.tokenizer.eos_token_id,
                     )
             
@@ -305,7 +305,8 @@ Example format:
         prompt = self._get_solution_prompt(problem)
 
         system_prompt = None
-        response = self._call_model(prompt, system_prompt)
+        # Step 1: Use 2048 tokens for solution generation (sufficient for math problems)
+        response = self._call_model(prompt, system_prompt, max_new_tokens=2048)
         print(f"Solution Response: {response}")
 
         step_result = {
@@ -324,7 +325,8 @@ Example format:
         prompt = self._get_reflection_prompt(problem, solution)
 
         system_prompt = None
-        response = self._call_model(prompt, system_prompt)
+        # Step 2: Use 32768 tokens for reflection (needs more tokens for detailed critique)
+        response = self._call_model(prompt, system_prompt, max_new_tokens=32768)
         print(f"Reflection Response: {response}")
 
         step_result = {
@@ -345,7 +347,8 @@ Example format:
         prompt = self._get_behavior_prompt(problem, solution, reflection)
 
         system_prompt = None
-        response = self._call_model(prompt, system_prompt)
+        # Step 3: Use 32768 tokens for behavior extraction (needs more tokens for comprehensive skill extraction)
+        response = self._call_model(prompt, system_prompt, max_new_tokens=32768)
         print(f"Behavior Extraction Response: {response}")
 
         # Try to parse behaviors from JSON response
@@ -753,9 +756,9 @@ if __name__ == "__main__":
         # If --single flag is set or no papers directory specified, use legacy single mode
         if args.single or (args.papers_dir is None and args.num_papers is None):
             result = reader.read_paper(task=args.task)
-            reader.save_reasoning(result)
+        reader.save_reasoning(result)
 
-            print("\n" + "=" * 80)
+        print("\n" + "=" * 80)
         print("BEHAVIOR CURATION PIPELINE COMPLETE")
         print("=" * 80)
         print(result["complete_reasoning"])
