@@ -9,10 +9,14 @@ import json
 import os
 import re
 import time
+from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set, Tuple
 
+import numpy as np
 import torch
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
@@ -40,6 +44,10 @@ class SkillAggregationServer:
         self.model = None
         self.tokenizer = None
         self.device = device or ("cuda" if self._check_cuda() else "cpu")
+        
+        # Embedding model for knowledge graph (loaded lazily)
+        self.embedding_model = None
+        self.embedding_model_name = "BAAI/bge-base-en-v1.5"
 
     def _check_cuda(self) -> bool:
         """Check if CUDA is available"""
@@ -260,113 +268,242 @@ class SkillAggregationServer:
 
         return step_result
 
-    def _get_reflection_prompt(self, skill_store: Dict) -> str:
-        """Get the Reflection Prompt for analyzing strengths and weaknesses"""
-        # Format skills for the prompt
-        skills_text = "\n".join(
-            [f"- {name}: {description}" for name, description in skill_store.items()]
-        )
-
-        prompt = f"""
-### Input  
-Skill Collection:
-{skills_text}
-
-### Task  
-Analyze each skill and identify:
-
-1. **Strengths**: What problems does this skill address effectively? What are its key advantages and when does it work best?
-
-2. **Weaknesses**: What are the limitations or failure modes of this skill? Under what circumstances does it fail or become inappropriate?
-
-3. **Use Cases**: When should this skill be applied? What types of problems benefit most from this skill?
-
-### Output Format  
-Provide a clear analysis for each skill, focusing on strengths and weaknesses. Be concise and practical.
-"""
-
-        return prompt
-
-    def _step_reflection(self, skill_store: Dict) -> Dict:
-        """Step 2: Generate reflection on skill strengths and weaknesses"""
-        prompt = self._get_reflection_prompt(skill_store)
-
-        system_prompt = None
-        response = self._call_model(prompt, system_prompt)
-        print(f"Reflection generated ({len(response)} characters)")
-
+    def _load_embedding_model(self):
+        """Load the embedding model for knowledge graph clustering"""
+        if self.embedding_model is not None:
+            return
+        
+        try:
+            print(f"Loading embedding model: {self.embedding_model_name}")
+            self.embedding_model = SentenceTransformer(self.embedding_model_name, device=self.device)
+            print("Embedding model loaded successfully!")
+        except ImportError:
+            raise ImportError(
+                "sentence-transformers is required. Install with: pip install sentence-transformers"
+            )
+        except Exception as e:
+            raise RuntimeError(f"Failed to load embedding model {self.embedding_model_name}: {e}")
+    
+    def _step_knowledge_graph_clustering(self, skill_store: Dict, r1: float = 0.9, r2: float = 0.4) -> Dict:
+        """Step 2: Build knowledge graph and cluster skills using embeddings"""
+        print("Building knowledge graph with embeddings...")
+        
+        # Load embedding model
+        self._load_embedding_model()
+        
+        # Prepare skill texts for embedding
+        skill_names = list(skill_store.keys())
+        skill_texts = [f"{name}: {desc}" for name, desc in skill_store.items()]
+        
+        # Compute embeddings
+        print(f"Computing embeddings for {len(skill_texts)} skills...")
+        embeddings = self.embedding_model.encode(skill_texts, convert_to_numpy=True, show_progress_bar=True)
+        
+        # Normalize embeddings for cosine similarity
+        embeddings_norm = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+        
+        # Compute pairwise cosine similarity
+        print("Computing pairwise cosine similarities...")
+        similarity_matrix = cosine_similarity(embeddings_norm)
+        
+        # Normalize similarity to [0, 1] range (cosine similarity is already in [-1, 1])
+        # Map from [-1, 1] to [0, 1]
+        similarity_matrix = (similarity_matrix + 1) / 2
+        
+        # Build graph: same skills (r1 threshold) and linked skills (r2 threshold)
+        same_skills = defaultdict(set)  # Groups of identical skills
+        graph_edges = []  # Edges for clustering
+        skill_to_group = {}  # Map skill to its same_skills group
+        
+        print(f"Building graph with thresholds: r1={r1} (same skill), r2={r2} (linked)")
+        for i in range(len(skill_names)):
+            for j in range(i + 1, len(skill_names)):
+                sim = similarity_matrix[i][j]
+                
+                if sim >= r1:
+                    # Same skill - merge into group
+                    if i not in skill_to_group and j not in skill_to_group:
+                        # Create new group
+                        group_id = len(same_skills)
+                        same_skills[group_id].add(i)
+                        same_skills[group_id].add(j)
+                        skill_to_group[i] = group_id
+                        skill_to_group[j] = group_id
+                    elif i in skill_to_group:
+                        # Add j to i's group
+                        group_id = skill_to_group[i]
+                        same_skills[group_id].add(j)
+                        skill_to_group[j] = group_id
+                    elif j in skill_to_group:
+                        # Add i to j's group
+                        group_id = skill_to_group[j]
+                        same_skills[group_id].add(i)
+                        skill_to_group[i] = group_id
+                elif sim >= r2:
+                    # Linked skills - add edge
+                    graph_edges.append((i, j, sim))
+        
+        # Build adjacency list for clustering
+        adjacency = defaultdict(set)
+        for i, j, sim in graph_edges:
+            adjacency[i].add(j)
+            adjacency[j].add(i)
+        
+        # Cluster skills within 2 hops
+        print("Clustering skills within 2 hops...")
+        clusters = []
+        visited = set()
+        
+        def get_2hop_neighbors(node: int) -> Set[int]:
+            """Get all nodes within 2 hops of a given node"""
+            neighbors = {node}
+            # 1-hop neighbors
+            if node in adjacency:
+                neighbors.update(adjacency[node])
+            # 2-hop neighbors
+            for neighbor in list(neighbors):
+                if neighbor in adjacency:
+                    neighbors.update(adjacency[neighbor])
+            return neighbors
+        
+        for i in range(len(skill_names)):
+            if i in visited:
+                continue
+            
+            # Get 2-hop cluster
+            cluster_nodes = get_2hop_neighbors(i)
+            cluster_nodes = {n for n in cluster_nodes if n not in visited}
+            
+            if len(cluster_nodes) > 1:  # Only create cluster if more than 1 node
+                clusters.append(cluster_nodes)
+                visited.update(cluster_nodes)
+        
+        # Convert to skill names
+        same_skills_groups = {
+            group_id: [skill_names[i] for i in group]
+            for group_id, group in same_skills.items()
+        }
+        
+        clusters_named = [
+            [skill_names[i] for i in cluster]
+            for cluster in clusters
+        ]
+        
+        print(f"Found {len(same_skills_groups)} groups of identical skills")
+        print(f"Found {len(clusters_named)} clusters")
+        
         step_result = {
             "step": 2,
-            "name": "Reflection on Skills",
-            "prompt": prompt,
-            "response": response,
+            "name": "Knowledge Graph Clustering",
+            "same_skills_groups": same_skills_groups,
+            "clusters": clusters_named,
+            "similarity_matrix": similarity_matrix.tolist(),
+            "graph_edges": [(skill_names[i], skill_names[j], float(sim)) for i, j, sim in graph_edges],
             "timestamp": time.time(),
         }
-
+        
         self.aggregation_steps.append(step_result)
         return step_result
 
-    def _get_encyclopedia_aggregation_prompt(
-        self, existing_encyclopedia: str, new_skills: Dict, reflection: str
+    def _get_cluster_summary_prompt(
+        self, same_skills_groups: Dict, clusters: List[List[str]], skill_store: Dict, r1: float = 0.9, r2: float = 0.4
     ) -> str:
-        """Get the Encyclopedia Prompt for aggregating new skills with existing encyclopedia"""
-        # Format new skills for the prompt
-        new_skills_text = "\n".join(
-            [f"- {name}: {description}" for name, description in new_skills.items()]
-        )
-
+        """Get the prompt for merging same skills and summarizing clusters"""
+        # Format same skills groups
+        same_skills_text = ""
+        for group_id, skill_names in same_skills_groups.items():
+            same_skills_text += f"\nGroup {group_id} (merge these into one skill):\n"
+            for skill_name in skill_names:
+                same_skills_text += f"  - {skill_name}: {skill_store.get(skill_name, 'N/A')}\n"
+        
+        # Format clusters
+        clusters_text = ""
+        for cluster_id, cluster_skills in enumerate(clusters):
+            clusters_text += f"\nCluster {cluster_id}:\n"
+            clusters_text += "  Skills in this cluster:\n"
+            for skill_name in cluster_skills:
+                clusters_text += f"    - {skill_name}: {skill_store.get(skill_name, 'N/A')}\n"
+        
+        # Get all unique skills (not in same_skills_groups)
+        all_skill_names = set(skill_store.keys())
+        merged_skill_names = set()
+        for group in same_skills_groups.values():
+            merged_skill_names.update(group)
+        standalone_skills = all_skill_names - merged_skill_names
+        
+        standalone_text = ""
+        if standalone_skills:
+            standalone_text = "\nStandalone Skills (keep as-is):\n"
+            for skill_name in standalone_skills:
+                standalone_text += f"  - {skill_name}: {skill_store.get(skill_name, 'N/A')}\n"
+        
         prompt = f"""
-You are maintaining a comprehensive Encyclopedia of problem-solving skills.
-
-Input:
-- Existing Encyclopedia (may be empty if this is the first time):  
-{existing_encyclopedia if existing_encyclopedia else "[No existing encyclopedia]"}
-  
-- New Skills to integrate:
-{new_skills_text}
-
-- Reflection on Strengths and Weaknesses:
-{reflection}
+You are building a comprehensive Skills Encyclopedia from clustered skills.
 
 ------------------------------------------------------------
-TASK: Build the updated Skill Encyclopedia
+TASK: Merge Same Skills and Summarize Clusters
 ------------------------------------------------------------
 
-Your goal is to merge, refine, and reorganize all skills into a clean, logically structured JSON encyclopedia.  
-Follow all instructions exactly:
+### Instructions:
 
-1. MERGE SKILLS (Deep reasoning required)
-- Combine new skills with the existing encyclopedia.  
-- If a skill already exists, merge intelligently by unifying strengths and fixing weaknesses described in the reflection.  
-- Merge highly similar skills into a single generalized, powerful skill.  
-- Abstract underlying principles so the final skill set is compact, non-redundant, and easy to reference.
+1. MERGE SAME SKILLS (similarity >= {r1})
+   - For each group of same skills below, merge them into ONE unified skill
+   - These skills have cosine similarity >= {r1}, indicating they are essentially the same
+   - Combine their descriptions, keeping all important technical details
+   - Create a single, comprehensive skill that captures all variations
+   - Skills should be very detailed and specific, going into deep technical details
+   - DO NOT abstract to general principles - keep technical specificity
 
-2. ORGANIZE INTO CATEGORIES
-- Group skills into meaningful, clearly separable categories (e.g., Reasoning, Planning, Creativity, Decision-Making, Reflection, Communication).  
-- ONLY create categories that improve clarity.  
-- Each category must contain non-overlapping skills.
+2. SUMMARIZE CLUSTERS (similarity {r2} to {r1})
+   - For each cluster below, create a cluster summary with:
+     * Cluster topic/theme (what connects these skills)
+     * Potential use cases (when to use skills from this cluster)
+     * List all skills in the cluster (DO NOT merge them - keep them separate)
+   - Skills in a cluster have cosine similarity between {r2} and {r1}, meaning they are related but distinct
+   - Keep them as separate entries within the cluster
 
-3. UPDATE SKILLS USING REFLECTION
-- Improve each skill's description using the reflection.  
-- Add use cases, failure modes, corrections, and clearer heuristics.  
-- Strengthen skills to be more actionable, robust, and generalizable.
+3. KEEP STANDALONE SKILLS
+   - Standalone skills (not in any group or cluster) should be kept as-is
 
-4. STYLE REQUIREMENTS
-- Be concise but information-dense.  
+### Same Skills Groups (MERGE these):
+{same_skills_text}
+
+### Clusters (SUMMARIZE these, but keep skills separate):
+{clusters_text}
+
+### Standalone Skills:
+{standalone_text}
+
+### Output Format:
+Output ONLY a JSON object with this structure:
 
 ```json
 {{
   "title": "Problem-Solving Skills Encyclopedia",
-  "categories": [
+  "merged_skills": [
     {{
-      "category_name": "...",
+      "skill_name": "...",
+      "description": "...",
+      "merged_from": ["skill1", "skill2", ...]
+    }}
+  ],
+  "clusters": [
+    {{
+      "cluster_id": 0,
+      "topic": "...",
+      "use_cases": ["...", "..."],
       "skills": [
         {{
           "skill_name": "...",
-          "description": "...",
-          "use_cases": ["..."]
+          "description": "..."
         }}
       ]
+    }}
+  ],
+  "standalone_skills": [
+    {{
+      "skill_name": "...",
+      "description": "..."
     }}
   ]
 }}
@@ -420,15 +557,13 @@ Output ONLY the JSON object, nothing else.
             # If extraction fails, return original text
             return text
 
-    def _step_encyclopedia_aggregation(self, new_skills: Dict, reflection: str) -> Dict:
-        """Step 3: Aggregate new skills with existing encyclopedia"""
-        prompt = self._get_encyclopedia_aggregation_prompt(
-            self.encyclopedia, new_skills, reflection
-        )
+    def _step_cluster_summary(self, same_skills_groups: Dict, clusters: List[List[str]], skill_store: Dict, r1: float = 0.9, r2: float = 0.4) -> Dict:
+        """Step 3: Merge same skills and summarize clusters"""
+        prompt = self._get_cluster_summary_prompt(same_skills_groups, clusters, skill_store, r1, r2)
 
         system_prompt = None
         response = self._call_model(prompt, system_prompt)
-        print(f"Encyclopedia aggregated ({len(response)} characters)")
+        print(f"Cluster summary generated ({len(response)} characters)")
 
         # Extract only JSON content, removing any explanatory text
         json_content = self._extract_json_only(response)
@@ -438,7 +573,7 @@ Output ONLY the JSON object, nothing else.
 
         step_result = {
             "step": 3,
-            "name": "Encyclopedia Aggregation",
+            "name": "Cluster Summary and Skill Merging",
             "prompt": prompt,
             "response": response,
             "encyclopedia": json_content,  # Store only JSON content
@@ -452,6 +587,8 @@ Output ONLY the JSON object, nothing else.
         self,
         json_files: Optional[List[str]] = None,
         incremental: bool = False,
+        r1: float = 0.9,
+        r2: float = 0.4,
     ) -> Dict:
         """
         Main method to aggregate skill books and build the Encyclopedia.
@@ -480,21 +617,21 @@ Output ONLY the JSON object, nothing else.
                 "aggregation_steps": self.aggregation_steps,
             }
 
-        # Step 2: Reflection on Strengths and Weaknesses
+        # Step 2: Knowledge Graph Clustering
         print("\n" + "=" * 80)
-        print("STEP 2: Reflecting on Strengths and Weaknesses")
+        print("STEP 2: Knowledge Graph Clustering")
+        print(f"Using thresholds: r1={r1} (same skill), r2={r2} (linked)")
         print("=" * 80)
-        reflection_result = self._step_reflection(self.skill_store)
-        reflection = reflection_result["response"]
+        clustering_result = self._step_knowledge_graph_clustering(self.skill_store, r1=r1, r2=r2)
+        same_skills_groups = clustering_result["same_skills_groups"]
+        clusters = clustering_result["clusters"]
         time.sleep(1)
 
-        # Step 3: Aggregate with Existing Encyclopedia
+        # Step 3: Merge Same Skills and Summarize Clusters
         print("\n" + "=" * 80)
-        print("STEP 3: Aggregating with Existing Encyclopedia")
+        print("STEP 3: Merging Same Skills and Summarizing Clusters")
         print("=" * 80)
-        encyclopedia_result = self._step_encyclopedia_aggregation(
-            self.skill_store, reflection
-        )
+        summary_result = self._step_cluster_summary(same_skills_groups, clusters, self.skill_store, r1=r1, r2=r2)
 
         # Compile results
         result = {
@@ -502,11 +639,15 @@ Output ONLY the JSON object, nothing else.
             "behavior_bookstore": self.skill_store,  # Keep for compatibility
             "collection_metadata": {
                 "files_processed": collection_result.get("files_processed", 0),
-                "total_skills_collected": collection_result.get("total_skills", 0),
+                "total_skills_collected": collection_result.get("total_skills_collected", 0),
+                "unique_skills": collection_result.get("unique_skills", 0),
                 "problems": collection_result.get("problems", []),
                 "collected_books": collection_result.get("collected_books", {}),
             },
-            "reflection": reflection,
+            "clustering": {
+                "same_skills_groups": same_skills_groups,
+                "clusters": clusters,
+            },
             "encyclopedia": self.encyclopedia,  # Final encyclopedia containing aggregated skills
             "aggregation_steps": self.aggregation_steps,
             "total_skills": len(self.skill_store),
@@ -570,6 +711,18 @@ if __name__ == "__main__":
         help="Output directory for results (default: build/log)",
     )
     parser.add_argument(
+        "--r1",
+        type=float,
+        default=0.9,
+        help="Threshold r1 for same skills (cosine similarity >= r1 means same skill, default: 0.9)",
+    )
+    parser.add_argument(
+        "--r2",
+        type=float,
+        default=0.4,
+        help="Threshold r2 for linked skills (r2 <= similarity < r1 means linked, default: 0.4)",
+    )
+    parser.add_argument(
         "-w",
         type=int,
         default=None,
@@ -587,7 +740,11 @@ if __name__ == "__main__":
 
     try:
         # Run aggregation pipeline
-        result = server.aggregate_and_build_encyclopedia(json_files=args.files)
+        result = server.aggregate_and_build_encyclopedia(
+            json_files=args.files,
+            r1=args.r1,
+            r2=args.r2
+        )
 
         # Save results
         server.save_results(result, output_dir=args.output_dir)
