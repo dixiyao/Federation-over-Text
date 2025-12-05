@@ -205,12 +205,12 @@ class ChainOfThoughtReader:
                 else:
                     # Default settings for other models
                     outputs = self.model.generate(
-                        **inputs,
-                            max_new_tokens=max_new_tokens,
+                    **inputs,
+                        max_new_tokens=max_new_tokens,
                         temperature=0.7,
                         do_sample=True,
                         top_p=0.9,
-                            repetition_penalty=1.8,  # Penalize repetition to avoid loops
+                        repetition_penalty=1.8,  # Penalize repetition to avoid loops
                         pad_token_id=self.tokenizer.eos_token_id,
                     )
             
@@ -752,40 +752,18 @@ if __name__ == "__main__":
         # If --single flag is set or no papers directory specified, use legacy single mode
         if args.single or (args.papers_dir is None and args.num_papers is None):
             result = reader.read_paper(task=args.task)
-        reader.save_reasoning(result)
+            reader.save_reasoning(result)
 
-        print("\n" + "=" * 80)
-            print("BEHAVIOR CURATION PIPELINE COMPLETE")
+            print("\n" + "=" * 80)
+        print("BEHAVIOR CURATION PIPELINE COMPLETE")
         print("=" * 80)
         print(result["complete_reasoning"])
-            print("\n" + "=" * 80)
-            print("EXTRACTED BEHAVIORS")
-            print("=" * 80)
-            for behavior_name, behavior_desc in result.get("behavior_book", {}).items():
-                print(f"\n{behavior_name}: {behavior_desc}")
-        else:
-            # Process multiple papers sequentially
-            results = reader.process_multiple_papers(
-                question=args.task,
-                papers_dir=args.papers_dir,
-                num_papers=args.num_papers,
-            )
-
-            # Print summary of all behavior books
-            print("\n" + "=" * 80)
-            print("ALL BEHAVIOR BOOKS SUMMARY")
-            print("=" * 80)
-            for idx, result in enumerate(results, 1):
-                print(f"\nPaper {idx}: {result['paper_name']}")
-                print(f"  Behaviors: {len(result.get('behavior_book', {}))}")
-                for behavior_name, behavior_desc in list(
-                    result.get("behavior_book", {}).items()
-                )[:3]:
-                    print(f"    - {behavior_name}: {behavior_desc[:100]}...")
-                if len(result.get("behavior_book", {})) > 3:
-                    print(
-                        f"    ... and {len(result.get('behavior_book', {})) - 3} more"
-                    )
+        print("\n" + "=" * 80)
+        print("EXTRACTED BEHAVIORS")
+        print("=" * 80)
+        for behavior_name, behavior_desc in result.get("behavior_book", {}).items():
+            print(f"\n{behavior_name}: {behavior_desc}")
+        print("\n" + "=" * 80)
 
     except Exception as e:
         print(f"Error: {e}")
