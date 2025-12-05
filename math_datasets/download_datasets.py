@@ -1,7 +1,7 @@
 """
 Download math datasets from Hugging Face or kvpress repository.
 Supports: aime24, aime25, math500, math1000, gsm8k, and other math datasets.
-This script downloads the datasets and saves them in the format expected by math.py.
+This script downloads the datasets and saves them in the format expected by math_pipeline.py.
 """
 
 import argparse

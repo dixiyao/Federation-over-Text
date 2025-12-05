@@ -54,16 +54,16 @@ https://github.com/minghui-liu/kvpress/tree/decode/reason
 
 Place the JSON files in this `math_datasets/` directory.
 
-## Usage in math.py
+## Usage in math_pipeline.py
 
 Once datasets are downloaded, use them by name:
 
 ```bash
 # Use default datasets (aime25 and math500)
-python math.py
+python math_pipeline.py
 
 # Use different datasets
-python math.py --dataset1 aime24 --dataset2 gsm8k
-python math.py --dataset1 gsm8k_train --dataset2 math1000
+python math_pipeline.py --dataset1 aime24 --dataset2 gsm8k
+python math_pipeline.py --dataset1 gsm8k_train --dataset2 math1000
 ```
 
