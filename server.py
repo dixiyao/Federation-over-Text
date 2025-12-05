@@ -190,11 +190,27 @@ class SkillAggregationServer:
                     data = json.load(f)
 
                 # Extract skill book (client.py uses "behavior_book" key but contains skills)
-                skill_book = data.get("behavior_book", {})
-                if not skill_book:
-                    # Try alternative keys
-                    skill_book = data.get("behaviors", {}) or data.get("skills", {})
-
+                # Handle both dict and list formats
+                skill_book_raw = data.get("behavior_book") or data.get("behaviors") or data.get("skills")
+                
+                # Convert list format to dict if needed
+                skill_book = {}
+                if isinstance(skill_book_raw, dict):
+                    skill_book = skill_book_raw
+                elif isinstance(skill_book_raw, list):
+                    # Convert list of dicts to dict format
+                    # Expected format: [{"behavior": "name", "description": "desc"}, ...]
+                    for item in skill_book_raw:
+                        if isinstance(item, dict):
+                            # Try different key names
+                            skill_name = item.get("behavior") or item.get("skill") or item.get("name")
+                            skill_desc = item.get("description") or item.get("desc")
+                            if skill_name and skill_desc:
+                                # Ensure skill name starts with "skill_" prefix
+                                if not skill_name.startswith("skill_"):
+                                    skill_name = f"skill_{skill_name}"
+                                skill_book[skill_name] = skill_desc
+                
                 if skill_book:
                     filename = Path(json_file).stem
                     collected_books[filename] = {
@@ -204,7 +220,7 @@ class SkillAggregationServer:
                         "solution": data.get("solution", ""),
                         "reflection": data.get("reflection", ""),
                     }
-
+                    
                     # Count and aggregate all skills
                     total_skills_count += len(skill_book)
                     for skill_name, skill_desc in skill_book.items():
@@ -212,9 +228,9 @@ class SkillAggregationServer:
                         all_skills[skill_name] = skill_desc
                         # Count occurrences
                         skill_counts[skill_name] = skill_counts.get(skill_name, 0) + 1
-
+                    
                     problems.append(data.get("problem", "Unknown"))
-
+                    
                     print(f"  Collected {len(skill_book)} skills from {filename}")
             except Exception as e:
                 print(f"  Warning: Failed to read {json_file}: {e}")
