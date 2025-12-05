@@ -477,8 +477,6 @@ Solve using relevant skills. Be concise.
         For math problems, extract final numerical answer and compare.
         """
         # Extract numbers from both answers
-        import re
-        
         def extract_numbers(text: str) -> List[float]:
             # Find all numbers (including decimals and negatives)
             numbers = re.findall(r'-?\d+\.?\d*', text)
