@@ -56,32 +56,36 @@ class MathPipeline:
         # Try to load as regular JSON first
         try:
             with open(dataset_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+                content = f.read().strip()
             
-            # Handle different dataset formats
-            problems = []
-            if isinstance(data, list):
-                problems = data
-            elif isinstance(data, dict):
-                # Try common keys (kvpress style)
-                if "problems" in data:
-                    problems = data["problems"]
-                elif "data" in data:
-                    problems = data["data"]
-                elif "test" in data:
-                    problems = data["test"]
-                elif "train" in data:
-                    problems = data["train"]
+            # Try parsing as single JSON object/array
+            try:
+                data = json.loads(content)
+                
+                # Handle different dataset formats
+                problems = []
+                if isinstance(data, list):
+                    problems = data
+                elif isinstance(data, dict):
+                    # Try common keys (kvpress style)
+                    if "problems" in data:
+                        problems = data["problems"]
+                    elif "data" in data:
+                        problems = data["data"]
+                    elif "test" in data:
+                        problems = data["test"]
+                    elif "train" in data:
+                        problems = data["train"]
+                    else:
+                        # Assume it's a single problem
+                        problems = [data]
                 else:
-                    # Assume it's a single problem
-                    problems = [data]
-            else:
-                raise ValueError(f"Unexpected dataset format: {type(data)}")
-        except json.JSONDecodeError as e:
-            # If JSON parsing fails, try JSONL format (one JSON object per line)
-            problems = []
-            with open(dataset_path, "r", encoding="utf-8") as f:
-                for line_num, line in enumerate(f, 1):
+                    raise ValueError(f"Unexpected dataset format: {type(data)}")
+            except json.JSONDecodeError as json_error:
+                # If single JSON parse fails, try JSONL format (one JSON object per line)
+                problems = []
+                lines = content.split('\n')
+                for line_num, line in enumerate(lines, 1):
                     line = line.strip()
                     if not line:  # Skip empty lines
                         continue
@@ -89,16 +93,38 @@ class MathPipeline:
                         problem = json.loads(line)
                         problems.append(problem)
                     except json.JSONDecodeError as line_error:
-                        # If it's the first line and we get an error, it might be a different issue
-                        if line_num == 1:
-                            raise ValueError(
-                                f"Failed to parse JSON file {dataset_path}. "
-                                f"Error at line {line_num}: {line_error}. "
-                                f"Original error: {e}"
-                            )
+                        # If it's the first non-empty line and we get an error, try to handle multiple JSON objects
+                        if line_num == 1 or (line_num <= 3 and not problems):
+                            # Try to extract JSON objects from the line using regex or manual parsing
+                            # Sometimes files have multiple JSON objects concatenated
+                            import re
+                            # Try to find JSON objects in the line
+                            json_objects = re.findall(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', line)
+                            if json_objects:
+                                for json_str in json_objects:
+                                    try:
+                                        problem = json.loads(json_str)
+                                        problems.append(problem)
+                                    except:
+                                        pass
+                            if not problems:
+                                # If still no success and it's early in the file, raise error
+                                if line_num <= 3:
+                                    raise ValueError(
+                                        f"Failed to parse JSON file {dataset_path}. "
+                                        f"Error at line {line_num}: {line_error}. "
+                                        f"Original error: {json_error}. "
+                                        f"Line content (first 100 chars): {line[:100]}"
+                                    )
                         # Otherwise, skip malformed lines
                         print(f"Warning: Skipping malformed line {line_num} in {dataset_path}")
                         continue
+        except FileNotFoundError:
+            raise
+        except Exception as e:
+            raise ValueError(
+                f"Failed to load dataset from {dataset_path}: {e}"
+            )
         
         # Normalize problem format to have consistent keys
         normalized = []
