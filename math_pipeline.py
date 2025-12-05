@@ -418,7 +418,7 @@ Please reason step by step using the relevant skills above. Put your final answe
             
             try:
                 # Generate answer using encyclopedia
-                answer = self.generate_server.generate(problem_text)
+                answer = self.generate_server.generate(problem_text,max_new_tokens=2048, is_math=True)
                 
                 # Extract answer from response
                 answer_text = answer
