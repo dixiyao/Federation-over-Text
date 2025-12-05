@@ -136,7 +136,7 @@ class SkillAggregationServer:
 
             # Generate response - dynamically size based on input, with larger limits for encyclopedia
             # Ensure max_new_tokens is larger than input tokens for comprehensive outputs
-            max_new_tokens = 32768  # Cap at 32k tokens for encyclopedia chapters
+            max_new_tokens = 78632  # 78k tokens for encyclopedia chapters
 
             print(
                 f"Input tokens: {input_token_count}, Max new tokens: {max_new_tokens}"
