@@ -312,17 +312,31 @@ Input:
 - Reflection on Strengths and Weaknesses:
 {reflection}
 
-### Task
-Aggregate the new skills with the existing encyclopedia:
+------------------------------------------------------------
+TASK: Build the updated Skill Encyclopedia
+------------------------------------------------------------
 
-1. **Merge Skills**: Combine new skills with existing ones. If a skill already exists, merge them thoughtfully by combining their strengths and addressing weaknesses identified in the reflection.
+Your goal is to merge, refine, and reorganize all skills into a clean, logically structured JSON encyclopedia.  
+Follow all instructions exactly:
 
-2. **Organize**: Organize all skills into logical categories. Create a structured JSON format with categories and skills.
+1. MERGE SKILLS (Deep reasoning required)
+- Combine new skills with the existing encyclopedia.  
+- If a skill already exists, merge intelligently by unifying strengths and fixing weaknesses described in the reflection.  
+- Merge highly similar skills into a single generalized, powerful skill.  
+- Abstract underlying principles so the final skill set is compact, non-redundant, and easy to reference.
 
-3. **Update**: Use the reflection to enhance skill descriptions with strengths, weaknesses, and use cases.
+2. ORGANIZE INTO CATEGORIES
+- Group skills into meaningful, clearly separable categories (e.g., Reasoning, Planning, Creativity, Decision-Making, Reflection, Communication).  
+- ONLY create categories that improve clarity.  
+- Each category must contain non-overlapping skills.
 
-### Output Format
-Output ONLY a JSON object with this structure:
+3. UPDATE SKILLS USING REFLECTION
+- Improve each skill's description using the reflection.  
+- Add use cases, failure modes, corrections, and clearer heuristics.  
+- Strengthen skills to be more actionable, robust, and generalizable.
+
+4. STYLE REQUIREMENTS
+- Be concise but information-dense.  
 
 ```json
 {{
@@ -334,8 +348,6 @@ Output ONLY a JSON object with this structure:
         {{
           "skill_name": "...",
           "description": "...",
-          "strengths": ["..."],
-          "weaknesses": ["..."],
           "use_cases": ["..."]
         }}
       ]
