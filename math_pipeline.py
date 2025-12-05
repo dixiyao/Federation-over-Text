@@ -2,6 +2,9 @@
 Math Problem Solving Pipeline
 Uses client.py to learn skills from dataset1, aggregates with server.py,
 and uses generate_server.py to solve problems in dataset2.
+
+Note: This file is named math_pipeline.py (not math.py) to avoid conflict
+with Python's built-in math module.
 """
 
 import argparse

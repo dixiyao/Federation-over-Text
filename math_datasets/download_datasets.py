@@ -12,96 +12,158 @@ from pathlib import Path
 try:
     from datasets import load_dataset
 except ImportError:
-    print("Error: datasets library not installed.")
-    print("Install with: pip install datasets")
-    exit(1)
+    load_dataset = None
+
+try:
+    import requests
+except ImportError:
+    requests = None
+
+
+def download_from_github(dataset_name: str, output_path: str) -> bool:
+    """Download dataset from kvpress GitHub repository"""
+    if requests is None:
+        return False
+    
+    base_url = "https://raw.githubusercontent.com/minghui-liu/kvpress/decode/reason"
+    github_url = f"{base_url}/{dataset_name}.json"
+    
+    try:
+        print(f"  Trying GitHub: {github_url}")
+        response = requests.get(github_url, timeout=30)
+        response.raise_for_status()
+        
+        # Save the file
+        with open(output_path, "wb") as f:
+            f.write(response.content)
+        
+        # Verify it's valid JSON
+        with open(output_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        print(f"  Downloaded {len(data) if isinstance(data, list) else 'unknown'} items from GitHub")
+        return True
+    except Exception as e:
+        print(f"  GitHub download failed: {e}")
+        return False
 
 
 def download_aime24(output_path: str = "aime24.json"):
-    """Download AIME24 dataset from Hugging Face"""
+    """Download AIME24 dataset from Hugging Face or GitHub"""
     print("Downloading AIME24 dataset...")
-    try:
-        dataset = load_dataset("openai/aime24", split="test")
-        problems = []
-        for item in dataset:
-            problems.append({
-                "id": item.get("id", len(problems) + 1),
-                "question": item.get("question", ""),
-                "answer": item.get("answer", ""),
-                "solution": item.get("solution", ""),
-            })
-        
-        with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(problems, f, indent=2, ensure_ascii=False)
-        
-        print(f"Downloaded {len(problems)} problems to {output_path}")
+    
+    # Try Hugging Face first
+    if load_dataset is not None:
+        try:
+            dataset = load_dataset("openai/aime24", split="test")
+            problems = []
+            for item in dataset:
+                problems.append({
+                    "id": item.get("id", len(problems) + 1),
+                    "question": item.get("question", ""),
+                    "answer": item.get("answer", ""),
+                    "solution": item.get("solution", ""),
+                })
+            
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump(problems, f, indent=2, ensure_ascii=False)
+            
+            print(f"Downloaded {len(problems)} problems to {output_path}")
+            return output_path
+        except Exception as e:
+            print(f"  Hugging Face download failed: {e}")
+            print("  Trying GitHub...")
+    
+    # Try GitHub
+    if download_from_github("aime24", output_path):
         return output_path
-    except Exception as e:
-        print(f"Error downloading AIME24: {e}")
-        print("Note: If dataset not found, you may need to download manually from kvpress repository")
-        return None
+    
+    print("Error: Could not download AIME24 from Hugging Face or GitHub")
+    print("Please download manually from: https://github.com/minghui-liu/kvpress/tree/decode/reason")
+    return None
 
 
 def download_aime25(output_path: str = "aime25.json"):
-    """Download AIME25 dataset from Hugging Face"""
+    """Download AIME25 dataset from Hugging Face or GitHub"""
     print("Downloading AIME25 dataset...")
-    try:
-        dataset = load_dataset("openai/aime25", split="test")
-        problems = []
-        for item in dataset:
-            problems.append({
-                "id": item.get("id", len(problems) + 1),
-                "question": item.get("question", ""),
-                "answer": item.get("answer", ""),
-                "solution": item.get("solution", ""),
-            })
-        
-        with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(problems, f, indent=2, ensure_ascii=False)
-        
-        print(f"Downloaded {len(problems)} problems to {output_path}")
+    
+    # Try Hugging Face first
+    if load_dataset is not None:
+        try:
+            dataset = load_dataset("openai/aime25", split="test")
+            problems = []
+            for item in dataset:
+                problems.append({
+                    "id": item.get("id", len(problems) + 1),
+                    "question": item.get("question", ""),
+                    "answer": item.get("answer", ""),
+                    "solution": item.get("solution", ""),
+                })
+            
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump(problems, f, indent=2, ensure_ascii=False)
+            
+            print(f"Downloaded {len(problems)} problems to {output_path}")
+            return output_path
+        except Exception as e:
+            print(f"  Hugging Face download failed: {e}")
+            print("  Trying GitHub...")
+    
+    # Try GitHub
+    if download_from_github("aime25", output_path):
         return output_path
-    except Exception as e:
-        print(f"Error downloading AIME25: {e}")
-        print("Note: If dataset not found, you may need to download manually from kvpress repository")
-        return None
+    
+    print("Error: Could not download AIME25 from Hugging Face or GitHub")
+    print("Please download manually from: https://github.com/minghui-liu/kvpress/tree/decode/reason")
+    return None
 
 
 def download_math500(output_path: str = "math500.json", num_problems: int = 500):
-    """Download MATH dataset (first N problems from MATH dataset)"""
+    """Download MATH dataset (first N problems from MATH dataset) or from GitHub"""
     print(f"Downloading MATH{num_problems} dataset...")
-    try:
-        # Load test split and take first N problems
-        dataset = load_dataset("hendrycks/competition_math", split="test")
-        problems = []
-        for i, item in enumerate(dataset):
-            if i >= num_problems:
-                break
-            # Extract answer from solution (format: ...#### answer)
-            solution = item.get("solution", "")
-            answer = ""
-            if "####" in solution:
-                answer = solution.split("####")[-1].strip()
-            else:
-                # Try to extract final answer from solution
-                answer = solution.strip().split("\n")[-1] if solution else ""
+    
+    # Try Hugging Face first
+    if load_dataset is not None:
+        try:
+            # Load test split and take first N problems
+            dataset = load_dataset("hendrycks/competition_math", split="test")
+            problems = []
+            for i, item in enumerate(dataset):
+                if i >= num_problems:
+                    break
+                # Extract answer from solution (format: ...#### answer)
+                solution = item.get("solution", "")
+                answer = ""
+                if "####" in solution:
+                    answer = solution.split("####")[-1].strip()
+                else:
+                    # Try to extract final answer from solution
+                    answer = solution.strip().split("\n")[-1] if solution else ""
+                
+                problems.append({
+                    "id": i + 1,
+                    "question": item.get("problem", ""),
+                    "answer": answer,
+                    "solution": solution,
+                })
             
-            problems.append({
-                "id": i + 1,
-                "question": item.get("problem", ""),
-                "answer": answer,
-                "solution": solution,
-            })
-        
-        with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(problems, f, indent=2, ensure_ascii=False)
-        
-        print(f"Downloaded {len(problems)} problems to {output_path}")
-        return output_path
-    except Exception as e:
-        print(f"Error downloading MATH{num_problems}: {e}")
-        print("Note: If dataset not found, you may need to download manually from kvpress repository")
-        return None
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump(problems, f, indent=2, ensure_ascii=False)
+            
+            print(f"Downloaded {len(problems)} problems to {output_path}")
+            return output_path
+        except Exception as e:
+            print(f"  Hugging Face download failed: {e}")
+            print("  Trying GitHub...")
+    
+    # Try GitHub (only for math500, not math1000)
+    if num_problems == 500:
+        if download_from_github("math500", output_path):
+            return output_path
+    
+    print(f"Error: Could not download MATH{num_problems} from Hugging Face or GitHub")
+    print("Please download manually from: https://github.com/minghui-liu/kvpress/tree/decode/reason")
+    return None
 
 
 def download_gsm8k(output_path: str = "gsm8k.json", split: str = "test"):
@@ -172,7 +234,7 @@ def download_dataset(dataset_name: str, output_path: str = None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Download math datasets for the math.py pipeline"
+        description="Download math datasets for the math_pipeline.py pipeline"
     )
     parser.add_argument(
         "--datasets",
@@ -224,7 +286,13 @@ if __name__ == "__main__":
         print("\nFailed to download:")
         for name in failed:
             print(f"  - {name}")
-        print("\nAlternative: Download manually from:")
-        print("https://github.com/minghui-liu/kvpress/tree/decode/reason")
+        print("\nTo download manually:")
+        print("1. Visit: https://github.com/minghui-liu/kvpress/tree/decode/reason")
+        print("2. Click on the dataset file (e.g., aime24.json)")
+        print("3. Click 'Raw' button to download")
+        print("4. Save the file to:", script_dir)
+        print("\nOr use curl/wget:")
+        for name in failed:
+            print(f"  curl -o {script_dir}/{name}.json https://raw.githubusercontent.com/minghui-liu/kvpress/decode/reason/{name}.json")
     
     print("=" * 80)
