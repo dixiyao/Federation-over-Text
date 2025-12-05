@@ -406,7 +406,7 @@ class SkillAggregationServer:
         return step_result
 
     def _get_cluster_summary_prompt(
-        self, same_skills_groups: Dict, clusters: List[List[str]], skill_store: Dict, r1: float = 0.9, r2: float = 0.4
+        self, same_skills_groups: Dict, clusters: List[List[str]], skill_store: Dict, existing_encyclopedia: str = "", r1: float = 0.9, r2: float = 0.4
     ) -> str:
         """Get the prompt for merging same skills and summarizing clusters"""
         # Format same skills groups
@@ -437,16 +437,33 @@ class SkillAggregationServer:
             for skill_name in standalone_skills:
                 standalone_text += f"  - {skill_name}: {skill_store.get(skill_name, 'N/A')}\n"
         
+        # Format existing encyclopedia section
+        existing_encyclopedia_section = ""
+        if existing_encyclopedia and existing_encyclopedia.strip():
+            existing_encyclopedia_section = f"""
+### Existing Encyclopedia (merge with this):
+{existing_encyclopedia}
+
+Note: You should merge new skills with the existing encyclopedia, combining similar skills and adding new ones.
+"""
+        
         prompt = f"""
 You are building a comprehensive Skills Encyclopedia from clustered skills.
-
+{existing_encyclopedia_section}
 ------------------------------------------------------------
 TASK: Merge Same Skills and Summarize Clusters
 ------------------------------------------------------------
 
 ### Instructions:
 
-1. MERGE SAME SKILLS (similarity >= {r1})
+1. MERGE WITH EXISTING ENCYCLOPEDIA (if provided)
+   - If an existing encyclopedia is provided above, merge the new skills with it
+   - If a skill in the new set already exists in the encyclopedia, merge them intelligently
+   - Combine descriptions, keeping all important technical details from both
+   - Add new skills that don't exist in the encyclopedia
+   - Maintain the structure and organization of the existing encyclopedia when possible
+
+2. MERGE SAME SKILLS (similarity >= {r1})
    - For each group of same skills below, merge them into ONE unified skill
    - These skills have cosine similarity >= {r1}, indicating they are essentially the same
    - Combine their descriptions, keeping all important technical details
@@ -454,7 +471,7 @@ TASK: Merge Same Skills and Summarize Clusters
    - Skills should be very detailed and specific, going into deep technical details
    - DO NOT abstract to general principles - keep technical specificity
 
-2. SUMMARIZE CLUSTERS (similarity {r2} to {r1})
+3. SUMMARIZE CLUSTERS (similarity {r2} to {r1})
    - For each cluster below, create a cluster summary with:
      * Cluster topic/theme (what connects these skills)
      * Potential use cases (when to use skills from this cluster)
@@ -462,7 +479,7 @@ TASK: Merge Same Skills and Summarize Clusters
    - Skills in a cluster have cosine similarity between {r2} and {r1}, meaning they are related but distinct
    - Keep them as separate entries within the cluster
 
-3. KEEP STANDALONE SKILLS
+4. KEEP STANDALONE SKILLS
    - Standalone skills (not in any group or cluster) should be kept as-is
 
 ### Same Skills Groups (MERGE these):
@@ -557,9 +574,9 @@ Output ONLY the JSON object, nothing else.
             # If extraction fails, return original text
             return text
 
-    def _step_cluster_summary(self, same_skills_groups: Dict, clusters: List[List[str]], skill_store: Dict, r1: float = 0.9, r2: float = 0.4) -> Dict:
+    def _step_cluster_summary(self, same_skills_groups: Dict, clusters: List[List[str]], skill_store: Dict, existing_encyclopedia: str = "", r1: float = 0.9, r2: float = 0.4) -> Dict:
         """Step 3: Merge same skills and summarize clusters"""
-        prompt = self._get_cluster_summary_prompt(same_skills_groups, clusters, skill_store, r1, r2)
+        prompt = self._get_cluster_summary_prompt(same_skills_groups, clusters, skill_store, existing_encyclopedia, r1, r2)
 
         system_prompt = None
         response = self._call_model(prompt, system_prompt)
@@ -583,12 +600,27 @@ Output ONLY the JSON object, nothing else.
         self.aggregation_steps.append(step_result)
         return step_result
 
+    def _load_existing_encyclopedia(self, output_dir: str) -> str:
+        """Load existing encyclopedia from output directory if it exists"""
+        encyclopedia_path = os.path.join(output_dir, "encyclopedia.txt")
+        if os.path.exists(encyclopedia_path):
+            try:
+                with open(encyclopedia_path, "r", encoding="utf-8") as f:
+                    content = f.read().strip()
+                if content:
+                    print(f"Loaded existing encyclopedia from {encyclopedia_path} ({len(content)} characters)")
+                    return content
+            except Exception as e:
+                print(f"Warning: Could not load existing encyclopedia: {e}")
+        return ""
+
     def aggregate_and_build_encyclopedia(
         self,
         json_files: Optional[List[str]] = None,
         incremental: bool = False,
         r1: float = 0.9,
         r2: float = 0.4,
+        output_dir: str = "build/log",
     ) -> Dict:
         """
         Main method to aggregate skill books and build the Encyclopedia.
@@ -596,6 +628,9 @@ Output ONLY the JSON object, nothing else.
         Args:
             json_files: List of JSON file paths. If None, scans input_dir.
             incremental: If True, processes files incrementally. If False, processes all at once.
+            r1: Threshold for same skills (cosine similarity >= r1 means same skill).
+            r2: Threshold for linked skills (r2 <= similarity < r1 means linked).
+            output_dir: Output directory to check for existing encyclopedia.
 
         Returns:
             Dictionary containing all aggregation steps and final encyclopedia.
@@ -631,7 +666,11 @@ Output ONLY the JSON object, nothing else.
         print("\n" + "=" * 80)
         print("STEP 3: Merging Same Skills and Summarizing Clusters")
         print("=" * 80)
-        summary_result = self._step_cluster_summary(same_skills_groups, clusters, self.skill_store, r1=r1, r2=r2)
+        # Load existing encyclopedia if it exists
+        existing_encyclopedia = self._load_existing_encyclopedia(output_dir)
+        if existing_encyclopedia:
+            print("Found existing encyclopedia - will merge with new skills")
+        summary_result = self._step_cluster_summary(same_skills_groups, clusters, self.skill_store, existing_encyclopedia, r1=r1, r2=r2)
 
         # Compile results
         result = {
@@ -722,12 +761,6 @@ if __name__ == "__main__":
         default=0.4,
         help="Threshold r2 for linked skills (r2 <= similarity < r1 means linked, default: 0.4)",
     )
-    parser.add_argument(
-        "-w",
-        type=int,
-        default=None,
-        help="Number of parallel workers for reading JSON files (default: min(8, num_files))",
-    )
 
     args = parser.parse_args()
 
@@ -743,7 +776,8 @@ if __name__ == "__main__":
         result = server.aggregate_and_build_encyclopedia(
             json_files=args.files,
             r1=args.r1,
-            r2=args.r2
+            r2=args.r2,
+            output_dir=args.output_dir
         )
 
         # Save results
