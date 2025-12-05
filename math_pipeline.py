@@ -15,9 +15,26 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
+try:
+    from datasets import load_dataset
+except ImportError:
+    load_dataset = None
+
 from client import ChainOfThoughtReader
 from generate_server import GenerateServer
 from server import SkillAggregationServer
+
+# Dataset mapping from kvpress: (dataset_name, subset, split)
+# Reference: https://github.com/minghui-liu/kvpress/tree/decode/reason
+DATASET_DICT = {
+    "gsm8k": ("openai/gsm8k", "main", "test"),
+    "gsm8k_train": ("openai/gsm8k", "main", "train"),
+    "aime25": ("math-ai/aime25", None, "test"),
+    "aime24": ("math-ai/aime24", None, "test"),
+    "commonsenseqa": ("tau/commonsense_qa", None, "validation"),
+    "math500": ("HuggingFaceH4/MATH-500", None, "test"),
+    "math1000": ("hendrycks/competition_math", None, "test"),  # Will take first 1000
+}
 
 
 class MathPipeline:
@@ -41,90 +58,82 @@ class MathPipeline:
         self.server = None
         self.generate_server = None
 
-    def load_math_dataset(self, dataset_path: str) -> List[Dict]:
+    def load_math_dataset(self, dataset_name: str) -> List[Dict]:
         """
-        Load math dataset from JSON file.
+        Load math dataset from Hugging Face using the datasets library.
+        Same approach as kvpress: https://github.com/minghui-liu/kvpress/blob/decode/reason/evaluate.py
         
-        Expected formats:
-        1. List of problems: [{"question": "...", "answer": "...", ...}, ...]
-        2. Dict with problems: {"problems": [...], ...}
-        3. Dict with data: {"data": [...], ...}
-        4. JSONL format: one JSON object per line
+        Args:
+            dataset_name: Dataset name (e.g., "aime25", "gsm8k", "math500")
+        
+        Returns:
+            List of problem dictionaries
         """
-        if not os.path.exists(dataset_path):
-            raise FileNotFoundError(f"Dataset not found: {dataset_path}")
-        
-        # Try to load as regular JSON first
-        try:
-            with open(dataset_path, "r", encoding="utf-8") as f:
-                content = f.read().strip()
-            
-            # Try parsing as single JSON object/array
-            try:
-                data = json.loads(content)
-                
-                # Handle different dataset formats
-                problems = []
-                if isinstance(data, list):
-                    problems = data
-                elif isinstance(data, dict):
-                    # Try common keys (kvpress style)
-                    if "problems" in data:
-                        problems = data["problems"]
-                    elif "data" in data:
-                        problems = data["data"]
-                    elif "test" in data:
-                        problems = data["test"]
-                    elif "train" in data:
-                        problems = data["train"]
-                    else:
-                        # Assume it's a single problem
-                        problems = [data]
-                else:
-                    raise ValueError(f"Unexpected dataset format: {type(data)}")
-            except json.JSONDecodeError as json_error:
-                # If single JSON parse fails, try JSONL format (one JSON object per line)
-                problems = []
-                lines = content.split('\n')
-                for line_num, line in enumerate(lines, 1):
-                    line = line.strip()
-                    if not line:  # Skip empty lines
-                        continue
-                    try:
-                        problem = json.loads(line)
-                        problems.append(problem)
-                    except json.JSONDecodeError as line_error:
-                        # If it's the first non-empty line and we get an error, try to handle multiple JSON objects
-                        if line_num == 1 or (line_num <= 3 and not problems):
-                            # Try to extract JSON objects from the line using regex or manual parsing
-                            # Sometimes files have multiple JSON objects concatenated
-                            # Try to find JSON objects in the line
-                            json_objects = re.findall(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', line)
-                            if json_objects:
-                                for json_str in json_objects:
-                                    try:
-                                        problem = json.loads(json_str)
-                                        problems.append(problem)
-                                    except:
-                                        pass
-                            if not problems:
-                                # If still no success and it's early in the file, raise error
-                                if line_num <= 3:
-                                    raise ValueError(
-                                        f"Failed to parse JSON file {dataset_path}. "
-                                        f"Error at line {line_num}: {line_error}. "
-                                        f"Original error: {json_error}. "
-                                        f"Line content (first 100 chars): {line[:100]}"
-                                    )
-                        # Otherwise, skip malformed lines
-                        print(f"Warning: Skipping malformed line {line_num} in {dataset_path}")
-                        continue
-        except FileNotFoundError:
-            raise
-        except Exception as e:
-            raise ValueError(
-                f"Failed to load dataset from {dataset_path}: {e}"
+        if load_dataset is None:
+            raise ImportError(
+                "datasets library is required. Install with: pip install datasets"
             )
+        
+        if dataset_name not in DATASET_DICT:
+            raise ValueError(
+                f"Unknown dataset: {dataset_name}. "
+                f"Available datasets: {', '.join(DATASET_DICT.keys())}"
+            )
+        
+        # Load from Hugging Face (exactly like kvpress does)
+        print(f"Loading dataset '{dataset_name}' from Hugging Face...")
+        dataset_info = DATASET_DICT[dataset_name]
+        hf_name = dataset_info[0]
+        data_dir = dataset_info[1]
+        data_split = dataset_info[2]
+        
+        # Load dataset exactly like kvpress: load_dataset(hf_name, data_dir=data_dir, split=data_split)
+        if data_dir:
+            ds = load_dataset(hf_name, data_dir=data_dir, split=data_split)
+        else:
+            ds = load_dataset(hf_name, split=data_split)
+        
+        # Handle special case for math1000 (take first 1000 from competition_math)
+        if dataset_name == "math1000":
+            problems = []
+            for i, item in enumerate(ds):
+                if i >= 1000:
+                    break
+                # Extract answer from solution (format: ...#### answer)
+                solution = item.get("solution", "")
+                answer = ""
+                if "####" in solution:
+                    answer = solution.split("####")[-1].strip()
+                else:
+                    answer = solution.strip().split("\n")[-1] if solution else ""
+                
+                problems.append({
+                    "id": i + 1,
+                    "question": item.get("problem", ""),
+                    "answer": answer,
+                    "solution": solution,
+                })
+            print(f"Loaded {len(problems)} problems from Hugging Face")
+        else:
+            # Convert dataset to list of problems (iterate like kvpress: for i, example in enumerate(ds))
+            problems = []
+            for i, item in enumerate(ds):
+                # Handle different dataset formats
+                problem = {
+                    "id": item.get("id", i + 1),
+                    "question": item.get("question", item.get("problem", "")),
+                    "answer": item.get("answer", ""),
+                    "solution": item.get("solution", item.get("answer", "")),
+                }
+                # For GSM8K, extract answer from solution
+                if dataset_name.startswith("gsm8k"):
+                    answer_text = item.get("answer", "")
+                    if "####" in answer_text:
+                        parts = answer_text.split("####")
+                        problem["solution"] = parts[0].strip()
+                        problem["answer"] = parts[-1].strip()
+                problems.append(problem)
+            print(f"Loaded {len(problems)} problems from Hugging Face")
         
         # Normalize problem format to have consistent keys
         normalized = []
@@ -147,7 +156,7 @@ class MathPipeline:
         return normalized
 
     def learn_skills_from_dataset1(
-        self, dataset1_path: str, max_problems: Optional[int] = None
+        self, dataset1_name: str, max_problems: Optional[int] = None
     ) -> str:
         """
         Step 1: Use client.py to learn skills from dataset1 (e.g., aime25).
@@ -160,12 +169,12 @@ class MathPipeline:
         print("STEP 1: Learning Skills from Dataset1")
         print("=" * 80)
         
-        # Load dataset1
-        problems = self.load_math_dataset(dataset1_path)
+        # Load dataset1 from Hugging Face
+        problems = self.load_math_dataset(dataset1_name)
         if max_problems:
             problems = problems[:max_problems]
         
-        print(f"Loaded {len(problems)} problems from {dataset1_path}")
+        print(f"Loaded {len(problems)} problems from dataset '{dataset1_name}'")
         
         # Create client instance
         self.client = ChainOfThoughtReader(
@@ -263,7 +272,7 @@ class MathPipeline:
 
     def solve_dataset2(
         self,
-        dataset2_path: str,
+        dataset2_name: str,
         encyclopedia_path: str,
         max_problems: Optional[int] = None,
     ) -> List[Dict]:
@@ -278,12 +287,12 @@ class MathPipeline:
         print("STEP 3: Solving Dataset2 with Learned Skills")
         print("=" * 80)
         
-        # Load dataset2
-        problems = self.load_math_dataset(dataset2_path)
+        # Load dataset2 from Hugging Face
+        problems = self.load_math_dataset(dataset2_name)
         if max_problems:
             problems = problems[:max_problems]
         
-        print(f"Loaded {len(problems)} problems from {dataset2_path}")
+        print(f"Loaded {len(problems)} problems from dataset '{dataset2_name}'")
         
         # Create generate server instance
         self.generate_server = GenerateServer(
@@ -406,8 +415,8 @@ Solve using relevant skills. Be concise.
 
     def run_full_pipeline(
         self,
-        dataset1_path: str,
-        dataset2_path: str,
+        dataset1_name: str,
+        dataset2_name: str,
         max_dataset1: Optional[int] = None,
         max_dataset2: Optional[int] = None,
         r1: float = 0.9,
@@ -425,13 +434,13 @@ Solve using relevant skills. Be concise.
         start_time = time.time()
         
         # Step 1: Learn skills from dataset1
-        skills_dir = self.learn_skills_from_dataset1(dataset1_path, max_problems=max_dataset1)
+        skills_dir = self.learn_skills_from_dataset1(dataset1_name, max_problems=max_dataset1)
         
         # Step 2: Aggregate skills
         encyclopedia_path = self.aggregate_skills(skills_dir, r1=r1, r2=r2)
         
         # Step 3: Solve dataset2
-        results = self.solve_dataset2(dataset2_path, encyclopedia_path, max_problems=max_dataset2)
+        results = self.solve_dataset2(dataset2_name, encyclopedia_path, max_problems=max_dataset2)
         
         # Calculate statistics
         total_time = time.time() - start_time
@@ -442,8 +451,8 @@ Solve using relevant skills. Be concise.
         )
         
         summary = {
-            "dataset1_path": dataset1_path,
-            "dataset2_path": dataset2_path,
+            "dataset1_name": dataset1_name,
+            "dataset2_name": dataset2_name,
             "num_dataset1_problems": max_dataset1 or "all",
             "num_dataset2_problems": len(results),
             "num_correct": num_correct,
@@ -506,13 +515,15 @@ if __name__ == "__main__":
         "--dataset1",
         type=str,
         default="aime25",
-        help="Dataset name for learning skills (e.g., aime25). File should be in math_datasets/{name}.json (default: aime25)",
+        help="Dataset name for learning skills (e.g., aime25, gsm8k). "
+             "Will load from Hugging Face if available, otherwise from math_datasets/{name}.json (default: aime25)",
     )
     parser.add_argument(
         "--dataset2",
         type=str,
         default="math500",
-        help="Dataset name for testing (e.g., math500). File should be in math_datasets/{name}.json (default: math500)",
+        help="Dataset name for testing (e.g., math500, gsm8k). "
+             "Will load from Hugging Face if available, otherwise from math_datasets/{name}.json (default: math500)",
     )
     parser.add_argument(
         "--max-dataset1",
@@ -562,18 +573,10 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Convert dataset names to file paths
-    # If it's already a path (contains / or .json), use it as-is
-    # Otherwise, treat it as a dataset name and look in math_datasets/
-    if "/" in args.dataset1 or args.dataset1.endswith(".json"):
-        dataset1_path = args.dataset1
-    else:
-        dataset1_path = f"math_datasets/{args.dataset1}.json"
-    
-    if "/" in args.dataset2 or args.dataset2.endswith(".json"):
-        dataset2_path = args.dataset2
-    else:
-        dataset2_path = f"math_datasets/{args.dataset2}.json"
+    # Use dataset names directly - they will be loaded from Hugging Face
+    # Just pass the dataset names, the program will handle downloading
+    dataset1_name = args.dataset1
+    dataset2_name = args.dataset2
 
     # Create pipeline
     pipeline = MathPipeline(
@@ -585,8 +588,8 @@ if __name__ == "__main__":
     try:
         # Run full pipeline
         summary = pipeline.run_full_pipeline(
-            dataset1_path=dataset1_path,
-            dataset2_path=dataset2_path,
+            dataset1_name=dataset1_name,
+            dataset2_name=dataset2_name,
             max_dataset1=args.max_dataset1,
             max_dataset2=args.max_dataset2,
             r1=args.r1,
