@@ -14,9 +14,25 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
+try:
+    from datasets import load_dataset
+except ImportError:
+    load_dataset = None
+
 from client import ChainOfThoughtReader
 from generate_server import GenerateServer
 from server import SkillAggregationServer
+
+# Dataset mapping from kvpress: (dataset_name, subset, split)
+# Reference: https://github.com/minghui-liu/kvpress/tree/decode/reason
+DATASET_DICT = {
+    "gsm8k": ("openai/gsm8k", "main", "test"),
+    "gsm8k_train": ("openai/gsm8k", "main", "train"),
+    "aime25": ("math-ai/aime25", None, "test"),
+    "aime24": ("math-ai/aime24", None, "test"),
+    "math500": ("HuggingFaceH4/MATH-500", None, "test"),
+    "math1000": ("hendrycks/competition_math", None, "test"),  # Will take first 1000
+}
 
 
 class MathPipeline:
@@ -40,40 +56,129 @@ class MathPipeline:
         self.server = None
         self.generate_server = None
 
-    def load_math_dataset(self, dataset_path: str) -> List[Dict]:
+    def load_math_dataset(self, dataset_name_or_path: str) -> List[Dict]:
         """
-        Load math dataset from JSON file.
+        Load math dataset from Hugging Face or JSON file.
         
-        Expected formats:
+        If dataset_name_or_path is a dataset name (e.g., "aime24", "gsm8k"), 
+        it will be loaded from Hugging Face using the datasets library.
+        
+        If it's a file path, it will be loaded from the JSON file.
+        
+        Expected JSON formats:
         1. List of problems: [{"question": "...", "answer": "...", ...}, ...]
         2. Dict with problems: {"problems": [...], ...}
         3. Dict with data: {"data": [...], ...}
+        4. JSONL format: one JSON object per line
         """
-        if not os.path.exists(dataset_path):
-            raise FileNotFoundError(f"Dataset not found: {dataset_path}")
-        
-        with open(dataset_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        
-        # Handle different dataset formats
-        problems = []
-        if isinstance(data, list):
-            problems = data
-        elif isinstance(data, dict):
-            # Try common keys (kvpress style)
-            if "problems" in data:
-                problems = data["problems"]
-            elif "data" in data:
-                problems = data["data"]
-            elif "test" in data:
-                problems = data["test"]
-            elif "train" in data:
-                problems = data["train"]
+        # Check if it's a dataset name (not a path)
+        dataset_name = dataset_name_or_path.lower()
+        if dataset_name in DATASET_DICT and load_dataset is not None:
+            # Load from Hugging Face
+            print(f"Loading dataset '{dataset_name}' from Hugging Face...")
+            dataset_info = DATASET_DICT[dataset_name]
+            dataset_name_hf = dataset_info[0]
+            subset = dataset_info[1]
+            split = dataset_info[2]
+            
+            if subset:
+                dataset = load_dataset(dataset_name_hf, subset, split=split)
             else:
-                # Assume it's a single problem
-                problems = [data]
+                dataset = load_dataset(dataset_name_hf, split=split)
+            
+            # Handle special case for math1000 (take first 1000 from competition_math)
+            if dataset_name == "math1000":
+                problems = []
+                for i, item in enumerate(dataset):
+                    if i >= 1000:
+                        break
+                    # Extract answer from solution (format: ...#### answer)
+                    solution = item.get("solution", "")
+                    answer = ""
+                    if "####" in solution:
+                        answer = solution.split("####")[-1].strip()
+                    else:
+                        answer = solution.strip().split("\n")[-1] if solution else ""
+                    
+                    problems.append({
+                        "id": i + 1,
+                        "question": item.get("problem", ""),
+                        "answer": answer,
+                        "solution": solution,
+                    })
+                print(f"Loaded {len(problems)} problems from Hugging Face")
+            else:
+                # Convert dataset to list of problems
+                problems = []
+                for item in dataset:
+                    # Handle different dataset formats
+                    problem = {
+                        "id": item.get("id", len(problems) + 1),
+                        "question": item.get("question", item.get("problem", "")),
+                        "answer": item.get("answer", ""),
+                        "solution": item.get("solution", item.get("answer", "")),
+                    }
+                    # For GSM8K, extract answer from solution
+                    if dataset_name.startswith("gsm8k"):
+                        answer_text = item.get("answer", "")
+                        if "####" in answer_text:
+                            parts = answer_text.split("####")
+                            problem["solution"] = parts[0].strip()
+                            problem["answer"] = parts[-1].strip()
+                    problems.append(problem)
+                print(f"Loaded {len(problems)} problems from Hugging Face")
         else:
-            raise ValueError(f"Unexpected dataset format: {type(data)}")
+            # Load from file path
+            dataset_path = dataset_name_or_path
+            if not os.path.exists(dataset_path):
+                raise FileNotFoundError(f"Dataset not found: {dataset_path}")
+            
+            # Try to load as regular JSON first
+            try:
+                with open(dataset_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                
+                # Handle different dataset formats
+                problems = []
+                if isinstance(data, list):
+                    problems = data
+                elif isinstance(data, dict):
+                    # Try common keys (kvpress style)
+                    if "problems" in data:
+                        problems = data["problems"]
+                    elif "data" in data:
+                        problems = data["data"]
+                    elif "test" in data:
+                        problems = data["test"]
+                    elif "train" in data:
+                        problems = data["train"]
+                    else:
+                        # Assume it's a single problem
+                        problems = [data]
+                else:
+                    raise ValueError(f"Unexpected dataset format: {type(data)}")
+            except json.JSONDecodeError as e:
+                # If JSON parsing fails, try JSONL format (one JSON object per line)
+                problems = []
+                with open(dataset_path, "r", encoding="utf-8") as f:
+                    for line_num, line in enumerate(f, 1):
+                        line = line.strip()
+                        if not line:  # Skip empty lines
+                            continue
+                        try:
+                            problem = json.loads(line)
+                            problems.append(problem)
+                        except json.JSONDecodeError as line_error:
+                            # If it's the first line and we get an error, it might be a different issue
+                            if line_num == 1:
+                                raise ValueError(
+                                    f"Failed to parse JSON file {dataset_path}. "
+                                    f"Error at line {line_num}: {line_error}. "
+                                    f"Original error: {e}"
+                                ) from line_error
+                            # Otherwise, skip malformed lines
+                            print(f"Warning: Skipping malformed line {line_num} in {dataset_path}")
+                            continue
         
         # Normalize problem format to have consistent keys
         normalized = []
@@ -513,18 +618,19 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Convert dataset names to file paths
-    # If it's already a path (contains / or .json), use it as-is
-    # Otherwise, treat it as a dataset name and look in math_datasets/
-    if "/" in args.dataset1 or args.dataset1.endswith(".json"):
-        dataset1_path = args.dataset1
-    else:
-        dataset1_path = f"math_datasets/{args.dataset1}.json"
+    # Use dataset names directly - they will be loaded from Hugging Face if available
+    # If it's a file path (contains / or .json), use it as-is
+    # Otherwise, treat it as a dataset name (will load from Hugging Face or math_datasets/)
+    dataset1_path = args.dataset1
+    dataset2_path = args.dataset2
     
-    if "/" in args.dataset2 or args.dataset2.endswith(".json"):
-        dataset2_path = args.dataset2
-    else:
-        dataset2_path = f"math_datasets/{args.dataset2}.json"
+    # If it's not a path and not in DATASET_DICT, try math_datasets/ folder
+    if load_dataset is None:
+        # If datasets library not available, fall back to file paths
+        if "/" not in dataset1_path and not dataset1_path.endswith(".json"):
+            dataset1_path = f"math_datasets/{dataset1_path}.json"
+        if "/" not in dataset2_path and not dataset2_path.endswith(".json"):
+            dataset2_path = f"math_datasets/{dataset2_path}.json"
 
     # Create pipeline
     pipeline = MathPipeline(

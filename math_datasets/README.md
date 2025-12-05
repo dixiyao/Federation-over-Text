@@ -35,9 +35,10 @@ To download datasets automatically:
 
 ```bash
 # Install dependencies
-pip install datasets
+pip install datasets requests
 
 # Download default datasets (aime24, aime25, math500, gsm8k)
+# The script will try Hugging Face first, then fall back to GitHub
 python math_datasets/download_datasets.py
 
 # Download specific datasets
