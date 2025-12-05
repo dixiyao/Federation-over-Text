@@ -152,10 +152,10 @@ class SkillAggregationServer:
                     outputs = self.model.generate(
                         **inputs,
                         max_new_tokens=max_new_tokens,
-                        temperature=0.6,  # Recommended for DeepSeek-R1
+                        temperature=0.7,  # Recommended for DeepSeek-R1
                         do_sample=True,
-                        top_p=0.95,  # Recommended for DeepSeek-R1
-                        repetition_penalty=1.1,
+                        top_p=0.9,  # Recommended for DeepSeek-R1
+                        repetition_penalty=1.2,
                         pad_token_id=self.tokenizer.eos_token_id,
                     )
                 else:
@@ -166,7 +166,7 @@ class SkillAggregationServer:
                         temperature=0.7,
                         do_sample=True,
                         top_p=0.9,
-                        repetition_penalty=1.1,
+                        repetition_penalty=1.2,
                         pad_token_id=self.tokenizer.eos_token_id,
                     )
 
