@@ -10,6 +10,7 @@ with Python's built-in math module.
 import argparse
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -97,7 +98,6 @@ class MathPipeline:
                         if line_num == 1 or (line_num <= 3 and not problems):
                             # Try to extract JSON objects from the line using regex or manual parsing
                             # Sometimes files have multiple JSON objects concatenated
-                            import re
                             # Try to find JSON objects in the line
                             json_objects = re.findall(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', line)
                             if json_objects:
