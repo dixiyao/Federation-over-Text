@@ -61,7 +61,7 @@ class MathPipeline:
         Load math dataset from Hugging Face or JSON file.
         
         If dataset_name_or_path is a dataset name (e.g., "aime24", "gsm8k"), 
-        it will be loaded from Hugging Face using the datasets library.
+        it will be loaded from Hugging Face using the datasets library (same as kvpress).
         
         If it's a file path, it will be loaded from the JSON file.
         
@@ -74,22 +74,23 @@ class MathPipeline:
         # Check if it's a dataset name (not a path)
         dataset_name = dataset_name_or_path.lower()
         if dataset_name in DATASET_DICT and load_dataset is not None:
-            # Load from Hugging Face
+            # Load from Hugging Face (same approach as kvpress)
             print(f"Loading dataset '{dataset_name}' from Hugging Face...")
             dataset_info = DATASET_DICT[dataset_name]
-            dataset_name_hf = dataset_info[0]
-            subset = dataset_info[1]
-            split = dataset_info[2]
+            hf_name = dataset_info[0]
+            data_dir = dataset_info[1]
+            data_split = dataset_info[2]
             
-            if subset:
-                dataset = load_dataset(dataset_name_hf, subset, split=split)
+            # Load dataset exactly like kvpress does
+            if data_dir:
+                ds = load_dataset(hf_name, data_dir=data_dir, split=data_split)
             else:
-                dataset = load_dataset(dataset_name_hf, split=split)
+                ds = load_dataset(hf_name, split=data_split)
             
             # Handle special case for math1000 (take first 1000 from competition_math)
             if dataset_name == "math1000":
                 problems = []
-                for i, item in enumerate(dataset):
+                for i, item in enumerate(ds):
                     if i >= 1000:
                         break
                     # Extract answer from solution (format: ...#### answer)
@@ -108,12 +109,12 @@ class MathPipeline:
                     })
                 print(f"Loaded {len(problems)} problems from Hugging Face")
             else:
-                # Convert dataset to list of problems
+                # Convert dataset to list of problems (iterate like kvpress does)
                 problems = []
-                for item in dataset:
+                for i, item in enumerate(ds):
                     # Handle different dataset formats
                     problem = {
-                        "id": item.get("id", len(problems) + 1),
+                        "id": item.get("id", i + 1),
                         "question": item.get("question", item.get("problem", "")),
                         "answer": item.get("answer", ""),
                         "solution": item.get("solution", item.get("answer", "")),
@@ -562,13 +563,15 @@ if __name__ == "__main__":
         "--dataset1",
         type=str,
         default="aime25",
-        help="Dataset name for learning skills (e.g., aime25). File should be in math_datasets/{name}.json (default: aime25)",
+        help="Dataset name for learning skills (e.g., aime25, gsm8k). "
+             "Will load from Hugging Face if available, otherwise from math_datasets/{name}.json (default: aime25)",
     )
     parser.add_argument(
         "--dataset2",
         type=str,
         default="math500",
-        help="Dataset name for testing (e.g., math500). File should be in math_datasets/{name}.json (default: math500)",
+        help="Dataset name for testing (e.g., math500, gsm8k). "
+             "Will load from Hugging Face if available, otherwise from math_datasets/{name}.json (default: math500)",
     )
     parser.add_argument(
         "--max-dataset1",
