@@ -229,180 +229,8 @@ class SkillAggregationServer:
         
         return step_result
 
-    def _get_skill_aggregation_prompt(self, raw_skill_store: Dict) -> str:
-        """Get the prompt for intelligently aggregating similar skills"""
-        # Format all skills for the prompt
-        skills_text = "\n".join([
-            f"- {name}: {description}"
-            for name, description in raw_skill_store.items()
-        ])
-        
-        prompt = f"""
-### Input
-Raw Skill Collection (from multiple sources):
-{skills_text}
-
-### Task: Intelligent Skill Aggregation
-You are analyzing a collection of skills extracted from multiple problem-solving processes. Your task is to intelligently aggregate these skills by:
-
-1. **Identifying Similar/Duplicate Skills:**
-   - Find skills that are essentially the same or very similar (different names but same concept)
-   - Identify skills that are variations or refinements of the same core technique
-   - Detect skills that overlap significantly in their application
-
-2. **Merging Similar Skills:**
-   - For similar skills, create a unified skill with:
-     * A canonical name (prefer the most descriptive or commonly used name)
-     * A comprehensive description that captures the essence of all variations
-     * Clear indication of when and how to apply it
-   - Preserve important nuances from different variations
-   - Remove true duplicates while keeping complementary aspects
-
-3. **Organizing Distinct Skills:**
-   - Keep skills that are genuinely distinct
-   - Ensure each skill in the final set is unique and valuable
-   - Maintain clarity about what each skill does and when to use it
-
-### Output Format
-Provide a JSON object with two keys:
-
-1. **"aggregation_reasoning"**: A detailed explanation of:
-   - Which skills you identified as similar/duplicate
-   - How you merged them and why
-   - What the final aggregated skill set represents
-
-2. **"aggregated_skills"**: A JSON object where:
-   - Keys are skill names (must start with `skill_`)
-   - Values are comprehensive skill descriptions
-   - Each skill should be a single line description
-   - The set should be deduplicated and intelligently merged
-
-Example format:
-```json
-{{
-  "aggregation_reasoning": "I identified that skill_pattern_matching and skill_recognize_patterns are essentially the same concept... I merged skill_math_formula and skill_apply_formula into a unified skill_apply_mathematical_formula...",
-  "aggregated_skills": {{
-    "skill_pattern_matching": "Recognize and apply patterns in problem structures to identify solution approaches.",
-    "skill_apply_mathematical_formula": "Apply relevant mathematical formulas with proper context and variable substitution.",
-    ...
-  }}
-}}
-```
-
-Now, analyze and aggregate the skills:
-"""
-        return prompt
-
-    def _step_skill_aggregation(self, raw_skill_store: Dict) -> Dict:
-        """Step 1.5: Intelligently aggregate similar skills with reasoning"""
-        prompt = self._get_skill_aggregation_prompt(raw_skill_store)
-        
-        system_prompt = None
-        response = self._call_model(prompt, system_prompt)
-        print(f"Skill aggregation completed ({len(response)} characters)")
-
-        # Parse the aggregated skills
-        aggregated_skills = {}
-        aggregation_reasoning = ""
-        
-        try:
-            # Try multiple strategies to extract JSON
-            # Strategy 1: Look for JSON code blocks
-            json_code_block = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response, re.DOTALL)
-            if json_code_block:
-                json_str = json_code_block.group(1)
-            else:
-                # Strategy 2: Look for JSON object in the response
-                json_match = re.search(r'\{[\s\S]*?"aggregated_skills"[\s\S]*?\}', response, re.DOTALL)
-                if json_match:
-                    json_str = json_match.group(0)
-                else:
-                    # Strategy 3: Try to find any JSON object
-                    json_match = re.search(r'\{.*\}', response, re.DOTALL)
-                    if json_match:
-                        json_str = json_match.group(0)
-                    else:
-                        json_str = None
-            
-            if json_str:
-                # Clean up the JSON string
-                json_str = json_str.strip()
-                # Remove any trailing commas before closing braces
-                json_str = re.sub(r',\s*}', '}', json_str)
-                json_str = re.sub(r',\s*]', ']', json_str)
-                
-                result = json.loads(json_str)
-                aggregated_skills = result.get("aggregated_skills", {})
-                aggregation_reasoning = result.get("aggregation_reasoning", "")
-                
-                # If aggregated_skills is empty, try to get skills directly
-                if not aggregated_skills and isinstance(result, dict):
-                    # Maybe the response structure is different
-                    for key in result.keys():
-                        if "skill" in key.lower() or isinstance(result[key], dict):
-                            potential_skills = result[key]
-                            if isinstance(potential_skills, dict):
-                                # Check if it looks like a skill dictionary
-                                if all(k.startswith("skill_") for k in list(potential_skills.keys())[:3]):
-                                    aggregated_skills = potential_skills
-                                    break
-                
-                if aggregated_skills:
-                    # Update the skill store with aggregated skills
-                    self.skill_store = aggregated_skills
-                    print(f"Successfully parsed {len(aggregated_skills)} aggregated skills")
-                else:
-                    print("Warning: No aggregated_skills found in JSON. Using raw skills.")
-                    aggregated_skills = raw_skill_store
-                    self.skill_store = raw_skill_store
-            else:
-                print("Warning: Could not find JSON in aggregation response. Using raw skills.")
-                print("Response preview:", response[:200] + "..." if len(response) > 200 else response)
-                aggregated_skills = raw_skill_store
-                self.skill_store = raw_skill_store
-        except json.JSONDecodeError as e:
-            print(f"Warning: JSON decode error: {e}")
-            print("Attempting to extract skills manually...")
-            # Try to extract skills manually using pattern matching
-            skill_pattern = r'["\']?(skill_\w+)["\']?\s*[:=]\s*["\']([^"\']+)["\']'
-            matches = re.findall(skill_pattern, response)
-            if matches:
-                for name, desc in matches:
-                    aggregated_skills[name] = desc.strip()
-                if aggregated_skills:
-                    self.skill_store = aggregated_skills
-                    print(f"Extracted {len(aggregated_skills)} skills using pattern matching")
-                else:
-                    aggregated_skills = raw_skill_store
-                    self.skill_store = raw_skill_store
-            else:
-                print("Could not extract skills manually. Using raw skills.")
-                aggregated_skills = raw_skill_store
-                self.skill_store = raw_skill_store
-        except Exception as e:
-            print(f"Warning: Error parsing aggregated skills: {e}. Using raw skills.")
-            aggregated_skills = raw_skill_store
-            self.skill_store = raw_skill_store
-
-        step_result = {
-            "step": 1.5,
-            "name": "Intelligent Skill Aggregation",
-            "prompt": prompt,
-            "response": response,
-            "aggregation_reasoning": aggregation_reasoning,
-            "raw_skills_count": len(raw_skill_store),
-            "aggregated_skills_count": len(aggregated_skills),
-            "aggregated_skills": aggregated_skills,
-            "timestamp": time.time(),
-        }
-
-        self.aggregation_steps.append(step_result)
-        print(f"\nAggregated {len(raw_skill_store)} raw skills into {len(aggregated_skills)} unique skills")
-        
-        return step_result
-
     def _get_reflection_prompt(self, skill_store: Dict) -> str:
-        """Get the Reflection Prompt for analyzing behaviors and improving reasoning"""
+        """Get the Reflection Prompt for analyzing strengths and weaknesses"""
         # Format skills for the prompt
         skills_text = "\n".join([
             f"- {name}: {description}"
@@ -411,41 +239,20 @@ Now, analyze and aggregate the skills:
         
         prompt = f"""
 ### Input  
-Skill Store (text):
+Skill Collection:
 {skills_text}
 
-### Context: Behaviors vs Skills
-Following the framework of generative models as complex systems science, we distinguish:
-- **Behaviors**: Observable patterns in how language models reason and solve problems (e.g., "tends to copy input patterns", "uses step-by-step decomposition", "applies domain-specific heuristics")
-- **Skills**: Reusable knowledge, methods, or techniques that can be extracted and stored (what we keep in the encyclopedia)
-
 ### Task  
-Analyze the reasoning behaviors that emerge from the application of these skills, and identify how behaviors can improve the reasoning process. For each skill, analyze:
+Analyze each skill and identify:
 
-#### 1. Observable Behaviors  
-- What **behaviors** (observable patterns) does using this skill typically produce in reasoning?  
-- How does the model behave differently when this skill is applied vs. when it's not?  
-- What patterns in the reasoning process indicate this skill is being used effectively?
+1. **Strengths**: What problems does this skill address effectively? What are its key advantages and when does it work best?
 
-#### 2. Behavior-Based Strengths & Weaknesses  
-- What problems does this skill address effectively, and what behaviors demonstrate this?  
-- What are the limitations or failure modes, and what behaviors signal these limitations?  
-- Under what circumstances do behaviors indicate the skill is failing or inappropriate?
+2. **Weaknesses**: What are the limitations or failure modes of this skill? Under what circumstances does it fail or become inappropriate?
 
-#### 3. Behavioral Relationships & Interactions  
-- How do behaviors from different skills interact or conflict?  
-- What behavioral patterns emerge when skills are combined?  
-- Are there complementary behaviors that suggest skills should be used together?
-
-#### 4. Behavior-Guided Improvements  
-- What **new behaviors** could improve the reasoning process for problems requiring these skills?  
-- How can we modify or extend these skills to produce better reasoning behaviors?  
-- What behavioral patterns are missing that would strengthen the overall reasoning capability?
+3. **Use Cases**: When should this skill be applied? What types of problems benefit most from this skill?
 
 ### Output Format  
-- Use clear section headings for each of the four analysis dimensions above.  
-- For each skill, identify the behaviors it produces and how those behaviors can guide reasoning improvements.  
-- Focus on observable patterns (behaviors) that can help us understand and improve reasoning, while keeping skills as the stored knowledge.
+Provide a clear analysis for each skill, focusing on strengths and weaknesses. Be concise and practical.
 """
         
         return prompt
@@ -469,60 +276,42 @@ Analyze the reasoning behaviors that emerge from the application of these skills
         self.aggregation_steps.append(step_result)
         return step_result
 
-    def _get_thinking_prompt(self, reflection: str, skill_store: Dict) -> str:
-        """Get the Thinking Prompt for generating an Encyclopedia Chapter"""
-        # Format skills for the prompt
-        skills_text = "\n".join([
+    def _get_encyclopedia_aggregation_prompt(self, existing_encyclopedia: str, new_skills: Dict, reflection: str) -> str:
+        """Get the Encyclopedia Prompt for aggregating new skills with existing encyclopedia"""
+        # Format new skills for the prompt
+        new_skills_text = "\n".join([
             f"- {name}: {description}"
-            for name, description in skill_store.items()
+            for name, description in new_skills.items()
         ])
         
         prompt = f"""
-You are an expert editor assembling a comprehensive **"Encyclopedia Chapter"** about problem-solving skills, informed by behavioral analysis.  
+You are maintaining a comprehensive Encyclopedia of problem-solving skills.
 
-Input:  
-- Skill Store (text):  
-  {skills_text}  
-- Reflection on Behaviors and Skills (text):  
-  {reflection}  
+Input:
+- Existing Encyclopedia (may be empty if this is the first time):  
+{existing_encyclopedia if existing_encyclopedia else "[No existing encyclopedia]"}
+  
+- New Skills to integrate:
+{new_skills_text}
 
-### Framework: Behaviors Guide Skills
-Following complex systems science principles, we use **behaviors** (observable reasoning patterns) to understand and improve reasoning, while storing **skills** (reusable knowledge) in the encyclopedia.
+- Reflection on Strengths and Weaknesses:
+{reflection}
 
-Definition:  
-- **Skills**: Generalizable methods, strategies, or techniques stored in the encyclopedia  
-- **Behaviors**: Observable patterns in reasoning that emerge when skills are applied (used to improve reasoning, not stored)
+### Task
+Aggregate the new skills with the existing encyclopedia:
 
-Task:  
-Write a full Encyclopedia Chapter that:
+1. **Merge Skills**: Combine new skills with existing ones. If a skill already exists, merge them thoughtfully by combining their strengths and addressing weaknesses identified in the reflection.
 
-1. Organizes the skills into logical **categories or themes** based on the behavioral patterns identified in the reflection.  
-2. For each skill, explains it clearly with:
-   - Context and examples of use
-   - **Behaviors** that indicate the skill is being applied effectively
-   - How to recognize when the skill should be used based on observable reasoning patterns
-3. Highlights **relationships** among skills based on how their behaviors interact (complementary, conflicting, or sequential behaviors).  
-4. Provides **guidance** on when and how to use each skill, informed by the behavioral analysis:
-   - Use-cases where the skill produces effective reasoning behaviors
-   - Behavioral indicators that suggest the skill is appropriate
-5. Notes **best practices** and **pitfalls** based on behaviors:
-   - What behaviors signal successful application
-   - What behaviors indicate the skill is failing or misapplied
-6. Presents a **coherent narrative** that connects skills to behaviors, helping practitioners understand both what to know (skills) and how to recognize effective reasoning (behaviors).
+2. **Organize**: Organize all skills into logical categories. Create a structured JSON format with categories and skills.
 
-### Important:
-- Store **skills** in the encyclopedia (reusable knowledge)
-- Use **behaviors** to guide when and how to apply skills (observable patterns)
-- The chapter should help readers both understand skills and recognize the behaviors that indicate effective reasoning  
+3. **Update**: Use the reflection to enhance skill descriptions with strengths, weaknesses, and use cases.
 
-Output Format:  
-**IMPORTANT: Output ONLY the JSON object. Do NOT include any explanations, thinking process, or commentary before or after the JSON.**
-
-Produce a single JSON object with the following schema:
+### Output Format
+Output ONLY a JSON object with this structure:
 
 ```json
 {{
-  "chapter_title": "Skills Encyclopedia",
+  "title": "Problem-Solving Skills Encyclopedia",
   "categories": [
     {{
       "category_name": "...",
@@ -530,124 +319,12 @@ Produce a single JSON object with the following schema:
         {{
           "skill_name": "...",
           "description": "...",
-          "behaviors": ["observable pattern 1", "observable pattern 2"],
-          "use_cases": ["...","..."],
-          "best_practices": ["...","..."],
-          "pitfalls": ["...","..."],
-          "related_skills": ["...","..."]
-        }},
-        ...
+          "strengths": ["..."],
+          "weaknesses": ["..."],
+          "use_cases": ["..."]
+        }}
       ]
-    }},
-    ...
-  ]
-}}
-```
-
-Output ONLY the JSON object, nothing else.
-"""
-        
-        return prompt
-
-    def _step_encyclopedia_chapter(self, reflection: str, skill_store: Dict) -> Dict:
-        """Step 3: Generate Encyclopedia Chapter from reflection and skill store"""
-        prompt = self._get_thinking_prompt(reflection, skill_store)
-        
-        system_prompt = None
-        response = self._call_model(prompt, system_prompt)
-        print(f"Encyclopedia Chapter generated ({len(response)} characters)")
-
-        # Extract only JSON content, removing any explanatory text
-        json_content = self._extract_json_only(response)
-        
-        step_result = {
-            "step": 3,
-            "name": "Encyclopedia Chapter Generation",
-            "prompt": prompt,
-            "response": response,
-            "chapter": json_content,  # Store only JSON content
-            "timestamp": time.time(),
-        }
-
-        self.aggregation_steps.append(step_result)
-        return step_result
-
-    def _get_encyclopedia_prompt(self, existing_encyclopedia: str, new_chapter: str) -> str:
-        """Get the Encyclopedia Prompt for synthesizing the complete Encyclopedia"""
-        prompt = f"""
-You are a knowledge-base curator maintaining a comprehensive Encyclopedia of problem-solving skills, organized through behavioral analysis.
-
-Input:
-- Existing Encyclopedia (may be "[No existing encyclopedia – this is the first chapter]"):  
-  {existing_encyclopedia}  
-- New Encyclopedia Chapter to integrate:  
-  {new_chapter}
-
-### Framework Reminder
-- **Skills**: Store reusable knowledge in the encyclopedia (what we keep)
-- **Behaviors**: Observable reasoning patterns that guide when/how to use skills (used to improve reasoning, not stored)
-
-Task:
-Produce the updated, complete Encyclopedia by merging the new chapter into the existing one. Your output should satisfy:
-
-1. **Integration & Structure**  
-   - Combine existing content and new chapter content into a unified structure.  
-   - Preserve or adapt the existing structure when possible; if no existing encyclopedia, build a full structure from the new chapter.  
-   - Ensure the final structure is hierarchical, coherent, and navigable (e.g., major sections / categories, sub-sections, skills entries).  
-   - Organize based on behavioral patterns where applicable (skills with similar behaviors grouped together).
-
-2. **Conflict & Redundancy Resolution**  
-   - Detect and resolve duplicates — if the same skill appears in both old and new content, merge them thoughtfully rather than duplicating.  
-   - If there are conflicting definitions or descriptions, reconcile them by merging the strengths of both or creating a consolidated, consistent version.  
-   - When merging, preserve behavioral information that helps guide skill application.
-
-3. **Cross-References & Relationships**  
-   - Update cross-references: ensure that citations, internal links or references between skills, sections, or categories remain correct.  
-   - Update relationships between skills based on behavioral interactions identified in the reflection.  
-   - Maintain behavioral indicators that help recognize when skills should be applied.
-
-4. **Consistency in Style & Format**  
-   - Use a uniform style, naming convention, and formatting for all entries (section headers, skill naming, categories, etc.).  
-   - Maintain consistent terminology distinguishing skills (stored knowledge) from behaviors (observable patterns).  
-   - Ensure behavioral information is consistently formatted across all skills.
-
-5. **Comprehensiveness & Organization**  
-   - Ensure that all **skills** from both existing encyclopedia and new chapter are included (unless a duplicate is merged).  
-   - Organize skills into logical categories or themes informed by behavioral patterns (e.g. "Mathematical Techniques", "Reasoning Strategies", "Verification & Error Checking", etc.).  
-   - Provide a Table-of-Contents (top-level index) listing all categories and the skills they contain.  
-   - Include behavioral indicators for skills where available to guide effective application.  
-
-Output Format:
-Produce the entire updated Encyclopedia in **JSON format**, using a nested structure. An example schema:
-
-```json
-{{
-  "title": "Problem-Solving Skills Encyclopedia",
-  "version": 2,
-  "table_of_contents": [
-     {{
-       "category_name": "...",
-       "skills": ["skill_name1", "skill_name2", ...]
-     }},
-     ...
-  ],
-  "categories": [
-     {{
-       "category_name": "...",
-       "skills": [
-         {{
-           "skill_name": "...",
-           "description": "...",
-           "behaviors": ["observable pattern 1", "observable pattern 2"],
-           "use_cases": ["...","..."],
-           "best_practices": ["...","..."],
-           "pitfalls": ["...","..."],
-           "related_skills": ["...","..."]
-         }},
-         ...
-       ]
-     }},
-     ...
+    }}
   ]
 }}
 ```
@@ -698,13 +375,13 @@ Output ONLY the JSON object, nothing else.
             # If extraction fails, return original text
             return text
 
-    def _step_encyclopedia_synthesis(self, new_chapter: str) -> Dict:
-        """Step 4: Synthesize complete Encyclopedia from existing and new chapter"""
-        prompt = self._get_encyclopedia_prompt(self.encyclopedia, new_chapter)
+    def _step_encyclopedia_aggregation(self, new_skills: Dict, reflection: str) -> Dict:
+        """Step 3: Aggregate new skills with existing encyclopedia"""
+        prompt = self._get_encyclopedia_aggregation_prompt(self.encyclopedia, new_skills, reflection)
         
         system_prompt = None
         response = self._call_model(prompt, system_prompt)
-        print(f"Encyclopedia synthesized ({len(response)} characters)")
+        print(f"Encyclopedia aggregated ({len(response)} characters)")
 
         # Extract only JSON content, removing any explanatory text
         json_content = self._extract_json_only(response)
@@ -713,8 +390,8 @@ Output ONLY the JSON object, nothing else.
         self.encyclopedia = json_content
 
         step_result = {
-            "step": 4,
-            "name": "Encyclopedia Synthesis",
+            "step": 3,
+            "name": "Encyclopedia Aggregation",
             "prompt": prompt,
             "response": response,
             "encyclopedia": json_content,  # Store only JSON content
@@ -739,7 +416,7 @@ Output ONLY the JSON object, nothing else.
         Returns:
             Dictionary containing all aggregation steps and final encyclopedia.
         """
-        # Step 1: Collect Skill Books
+        # Step 1: Collect Skill Books (append all skills together)
         print("\n" + "="*80)
         print("STEP 1: Collecting Skill Books")
         print("="*80)
@@ -756,58 +433,31 @@ Output ONLY the JSON object, nothing else.
                 "aggregation_steps": self.aggregation_steps,
             }
 
-        # Step 1.5: Intelligently Aggregate Similar Skills
+        # Step 2: Reflection on Strengths and Weaknesses
         print("\n" + "="*80)
-        print("STEP 1.5: Intelligently Aggregating Similar Skills")
-        print("="*80)
-        raw_skill_store = self.skill_store.copy()  # Keep raw skills for reference
-        aggregation_result = self._step_skill_aggregation(raw_skill_store)
-        time.sleep(1)
-
-        if not self.skill_store:
-            print("Warning: No skills after aggregation!")
-            return {
-                "error": "No skills after aggregation",
-                "aggregation_steps": self.aggregation_steps,
-            }
-
-        # Step 2: Reflection on Skills
-        print("\n" + "="*80)
-        print("STEP 2: Generating Reflection on Skills")
+        print("STEP 2: Reflecting on Strengths and Weaknesses")
         print("="*80)
         reflection_result = self._step_reflection(self.skill_store)
         reflection = reflection_result["response"]
         time.sleep(1)
 
-        # Step 3: Generate Encyclopedia Chapter
+        # Step 3: Aggregate with Existing Encyclopedia
         print("\n" + "="*80)
-        print("STEP 3: Generating Encyclopedia Chapter")
+        print("STEP 3: Aggregating with Existing Encyclopedia")
         print("="*80)
-        chapter_result = self._step_encyclopedia_chapter(reflection, self.skill_store)
-        new_chapter = chapter_result["chapter"]
-        time.sleep(1)
-
-        # Step 4: Synthesize Complete Encyclopedia
-        print("\n" + "="*80)
-        print("STEP 4: Synthesizing Complete Encyclopedia")
-        print("="*80)
-        encyclopedia_result = self._step_encyclopedia_synthesis(new_chapter)
+        encyclopedia_result = self._step_encyclopedia_aggregation(self.skill_store, reflection)
 
         # Compile results
         result = {
-            "raw_skill_store": raw_skill_store,  # Original collected skills (before aggregation)
-            "skill_store": self.skill_store,  # Aggregated skills (after intelligent merging)
+            "skill_store": self.skill_store,
             "behavior_bookstore": self.skill_store,  # Keep for compatibility
-            "aggregation_reasoning": aggregation_result.get("aggregation_reasoning", ""),
             "collection_metadata": {
                 "files_processed": collection_result.get("files_processed", 0),
                 "total_skills_collected": collection_result.get("total_skills", 0),
-                "total_skills_after_aggregation": len(self.skill_store),
                 "problems": collection_result.get("problems", []),
                 "collected_books": collection_result.get("collected_books", {}),
             },
             "reflection": reflection,
-            "encyclopedia_chapter": new_chapter,
             "encyclopedia": self.encyclopedia,  # Final encyclopedia containing aggregated skills
             "aggregation_steps": self.aggregation_steps,
             "total_skills": len(self.skill_store),
