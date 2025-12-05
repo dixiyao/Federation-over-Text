@@ -196,10 +196,11 @@ class ChainOfThoughtReader:
                     outputs = self.model.generate(
                         **inputs,
                         max_new_tokens=max_new_tokens,
-                        temperature=0.6,  # Recommended for DeepSeek-R1
                         do_sample=True,
-                        top_p=0.95,  # Recommended for DeepSeek-R1
-                        repetition_penalty=1.8,  # Penalize repetition to avoid loops
+                        top_p=0.9,
+                        temperature=0.7,
+                        repetition_penalty=1.2,
+                        use_cache=True,
                         pad_token_id=self.tokenizer.eos_token_id,
                     )
                 else:
