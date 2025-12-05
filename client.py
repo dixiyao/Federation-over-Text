@@ -305,8 +305,7 @@ Example format:
         prompt = self._get_solution_prompt(problem)
 
         system_prompt = None
-        # Step 1: Use 2048 tokens for solution generation (sufficient for math problems)
-        response = self._call_model(prompt, system_prompt, max_new_tokens=2048)
+        response = self._call_model(prompt, system_prompt, max_new_tokens=4096)
         print(f"Solution Response: {response}")
 
         step_result = {
