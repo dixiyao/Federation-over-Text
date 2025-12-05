@@ -40,33 +40,33 @@ class ChainOfThoughtReader:
             or "Analyze this paper and identify key contributions, limitations, and potential future research directions."
         )
         self.behavior_book = {}  # Store extracted behaviors
-
+        
         # Model and tokenizer will be loaded lazily on first use
         self.model = None
         self.tokenizer = None
         self.device = device or ("cuda" if self._check_cuda() else "cpu")
-
+        
     def _check_cuda(self) -> bool:
         """Check if CUDA is available"""
         try:
             return torch.cuda.is_available()
         except ImportError:
             return False
-
+    
     def _load_model(self):
         """Lazy load the Hugging Face model and tokenizer"""
         if self.model is not None and self.tokenizer is not None:
             return
-
+        
         try:
             print(f"Loading model: {self.model_name}")
             print(f"Device: {self.device}")
-
+            
             # Load tokenizer
             self.tokenizer = AutoTokenizer.from_pretrained(
                 self.model_name, trust_remote_code=True
             )
-
+            
             # Load model
             # Use torch_dtype instead of dtype for from_pretrained
             model_kwargs = {
@@ -82,16 +82,16 @@ class ChainOfThoughtReader:
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.model_name, **model_kwargs
             )
-
+            
             if self.device == "cpu":
                 self.model = self.model.to(self.device)
-
+            
             # Set pad token if not present
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
-
+            
             print("Model loaded successfully!")
-
+            
         except ImportError:
             raise ImportError(
                 "transformers and torch are required. Install with: pip install transformers torch"
@@ -141,25 +141,27 @@ class ChainOfThoughtReader:
     def _call_model(self, prompt: str, system_prompt: Optional[str] = None) -> str:
         """
         Call the Hugging Face language model.
-
+        
         Args:
             prompt: The user prompt
             system_prompt: Optional system prompt (will be prepended if provided)
-
+                          NOTE: For DeepSeek-R1 models, avoid system prompts - put all in user prompt
+        
         Returns:
             Generated text response
         """
         # Load model if not already loaded
         self._load_model()
-
-        # Combine system prompt and user prompt
+        
+        # For DeepSeek-R1: Avoid system prompts, put all instructions in user prompt
+        # If system_prompt is provided, combine it into the user prompt
         if system_prompt:
             full_prompt = f"{system_prompt}\n\n{prompt}"
         else:
             full_prompt = prompt
-
+        
         try:
-
+            
             # Tokenize input
             # For papers with ~80k characters, we need ~20-30k tokens
             # DeepSeek-R1 supports large context windows (64k+ tokens)
@@ -182,26 +184,43 @@ class ChainOfThoughtReader:
             print(
                 f"Input tokens: {input_token_count}, Max new tokens: {max_new_tokens}"
             )
-
+            
             # Generate response
             with torch.no_grad():
+                # DeepSeek-R1 recommendations: temperature 0.5-0.7 (0.6 recommended)
+                # Check if model name contains "DeepSeek-R1" to use recommended settings
+                is_deepseek_r1 = "DeepSeek-R1" in self.model_name
+                
+                if is_deepseek_r1:
+                    # DeepSeek-R1 recommended settings
+                    outputs = self.model.generate(
+                        **inputs,
+                        max_new_tokens=max_new_tokens,
+                        temperature=0.6,  # Recommended for DeepSeek-R1
+                        do_sample=True,
+                        top_p=0.95,  # Recommended for DeepSeek-R1
+                        repetition_penalty=1.8,  # Penalize repetition to avoid loops
+                        pad_token_id=self.tokenizer.eos_token_id,
+                    )
+                else:
+                    # Default settings for other models
                 outputs = self.model.generate(
                     **inputs,
-                    max_new_tokens=max_new_tokens,
+                        max_new_tokens=max_new_tokens,
                     temperature=0.7,
                     do_sample=True,
                     top_p=0.9,
-                    repetition_penalty=1.8,  # Penalize repetition to avoid loops
+                        repetition_penalty=1.8,  # Penalize repetition to avoid loops
                     pad_token_id=self.tokenizer.eos_token_id,
                 )
-
+            
             # Decode response
             generated_text = self.tokenizer.decode(
                 outputs[0][inputs["input_ids"].shape[1] :], skip_special_tokens=True
             )
-
+            
             return generated_text.strip()
-
+            
         except Exception as e:
             print(f"Error calling model: {e}")
             return f"[Error] Model generation failed: {str(e)}"
@@ -273,8 +292,8 @@ Example format:
 {{
   "skill_exampleName": "Description of the skill.",
   "skill_anotherOne": "Another skill description."
-}}
-"""
+                     }}
+                """
         prompt = prompt_template.format(
             problem=problem, solution=solution, reflection=reflection
         )
@@ -718,7 +737,7 @@ if __name__ == "__main__":
 
     # Example usage
     reader = ChainOfThoughtReader(
-        model_name=args.model,
+        model_name=args.model, 
         task=args.task,
         device=args.device,
         papers_dir=args.papers_dir,
@@ -733,12 +752,12 @@ if __name__ == "__main__":
         # If --single flag is set or no papers directory specified, use legacy single mode
         if args.single or (args.papers_dir is None and args.num_papers is None):
             result = reader.read_paper(task=args.task)
-            reader.save_reasoning(result)
+        reader.save_reasoning(result)
 
-            print("\n" + "=" * 80)
+        print("\n" + "=" * 80)
             print("BEHAVIOR CURATION PIPELINE COMPLETE")
-            print("=" * 80)
-            print(result["complete_reasoning"])
+        print("=" * 80)
+        print(result["complete_reasoning"])
             print("\n" + "=" * 80)
             print("EXTRACTED BEHAVIORS")
             print("=" * 80)

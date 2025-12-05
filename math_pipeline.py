@@ -344,6 +344,7 @@ class MathPipeline:
         self.generate_server = GenerateServer(
             model_name=self.model_name,
             device=self.device,
+            max_new_tokens=2048,  # Smaller max tokens for math problems
         )
         
         # Load encyclopedia
@@ -382,16 +383,20 @@ class MathPipeline:
         original_prompt_method = self.generate_server._get_generation_prompt
         
         def optimized_prompt(query: str) -> str:
-            """Optimized prompt with minimal tokens - focuses on relevant skills"""
-            # Use a very concise prompt that minimizes token usage
+            """
+            Optimized prompt with minimal tokens - focuses on relevant skills.
+            For DeepSeek-R1: all instructions in user prompt, no system prompt.
+            For math: include directive to reason step by step and use \\boxed{}.
+            """
+            # DeepSeek-R1 format: all in user prompt, enforce reasoning start
             prompt = f"""Skills:
 {skills_text}
 
-Q: {query}
+Problem: {query}
 
-Solve using relevant skills. Be concise.
+Please reason step by step using the relevant skills above. Put your final answer within \\boxed{{}}.
 
-## Answer:
+<think>
 """
             return prompt
         

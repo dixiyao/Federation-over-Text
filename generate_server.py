@@ -19,9 +19,11 @@ class GenerateServer:
         self,
         model_name: str = "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
         device: Optional[str] = None,
+        max_new_tokens: int = 98304,
     ):
         self.model_name = model_name
         self.encyclopedia = ""
+        self.max_new_tokens = max_new_tokens
 
         # Model and tokenizer will be loaded lazily on first use
         self.model = None
@@ -93,30 +95,45 @@ class GenerateServer:
                 f"Failed to load encyclopedia from {encyclopedia_path}: {e}"
             )
 
-    def _get_generation_prompt(self, query: str) -> str:
-        """Get the prompt for generating an answer using the encyclopedia"""
-        prompt = f"""
-You are an expert assistant with access to a comprehensive Skills Encyclopedia. Use the encyclopedia to provide accurate, helpful answers to queries.
-
-### Encyclopedia:
+    def _get_generation_prompt(self, query: str, is_math: bool = True) -> str:
+        """
+        Get the prompt for generating an answer using the encyclopedia.
+        
+        For DeepSeek-R1 models: All instructions must be in the user prompt (no system prompt).
+        For math problems: Include directive to reason step by step and put answer in \\boxed{}.
+        """
+        # For DeepSeek-R1: all instructions in user prompt, no system prompt
+        if is_math:
+            prompt = f"""Skills Encyclopedia:
 {self.encyclopedia}
 
-### Query:
-{query}
+Problem: {query}
 
-### Task:
-Based on the Skills Encyclopedia above, provide a clear and comprehensive answer to the query. Reference specific skills, categories, or techniques from the encyclopedia when relevant. If the query requires skills or knowledge not in the encyclopedia, acknowledge this and provide the best answer you can based on the available information.
+Please reason step by step using the relevant skills from the encyclopedia above. Put your final answer within \\boxed{{}}.
 
-You should finally include a field starting with "## Answer:" and ending with "## End of Answer:". This field should contain the answer to the query.
+<think>
+"""
+        else:
+            prompt = f"""Skills Encyclopedia:
+{self.encyclopedia}
+
+Query: {query}
+
+Based on the Skills Encyclopedia above, provide a clear and comprehensive answer to the query. Reference specific skills, categories, or techniques from the encyclopedia when relevant.
+
+<think>
 """
         return prompt
 
-    def generate(self, query: str) -> str:
+    def generate(self, query: str, max_new_tokens: Optional[int] = None, is_math: bool = True) -> str:
         """
         Generate an answer to a query using the encyclopedia.
 
         Args:
             query: The question or query to answer
+            max_new_tokens: Maximum number of new tokens to generate. 
+                           If None, uses the value from __init__ (default: None)
+            is_math: Whether this is a math problem (affects prompt format for DeepSeek-R1)
 
         Returns:
             Generated answer text
@@ -127,8 +144,8 @@ You should finally include a field starting with "## Answer:" and ending with "#
         # Load model if not already loaded
         self._load_model()
 
-        # Get the prompt
-        prompt = self._get_generation_prompt(query)
+        # Get the prompt (DeepSeek-R1: all instructions in user prompt, no system prompt)
+        prompt = self._get_generation_prompt(query, is_math=is_math)
 
         try:
             # Tokenize input
@@ -142,19 +159,21 @@ You should finally include a field starting with "## Answer:" and ending with "#
             # Calculate input token count for dynamic output sizing
             input_token_count = inputs["input_ids"].shape[1]
 
-            max_new_tokens = 98304  # ~70k words
+            # Use provided max_new_tokens or fall back to instance default
+            max_tokens = max_new_tokens if max_new_tokens is not None else self.max_new_tokens
 
             print(
-                f"Input tokens: {input_token_count}, Max new tokens: {max_new_tokens}"
+                f"Input tokens: {input_token_count}, Max new tokens: {max_tokens}"
             )
 
             with torch.no_grad():
+                # DeepSeek-R1 recommendations: temperature 0.5-0.7 (0.6 recommended)
                 outputs = self.model.generate(
                     **inputs,
-                    max_new_tokens=max_new_tokens,
-                    temperature=0.7,
+                    max_new_tokens=max_tokens,
+                    temperature=0.6,  # Recommended for DeepSeek-R1
                     do_sample=True,
-                    top_p=0.9,
+                    top_p=0.95,  # Recommended for DeepSeek-R1
                     repetition_penalty=1.1,
                     pad_token_id=self.tokenizer.eos_token_id,
                 )
@@ -210,6 +229,12 @@ if __name__ == "__main__":
         default=None,
         help="Output file to save the answer (optional)",
     )
+    parser.add_argument(
+        "--max-new-tokens",
+        type=int,
+        default=98304,
+        help="Maximum number of new tokens to generate (default: 98304)",
+    )
 
     args = parser.parse_args()
 
@@ -217,6 +242,7 @@ if __name__ == "__main__":
     server = GenerateServer(
         model_name=args.model,
         device=args.device,
+        max_new_tokens=args.max_new_tokens,
     )
 
     try:

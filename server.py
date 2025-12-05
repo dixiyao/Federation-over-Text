@@ -143,15 +143,32 @@ class SkillAggregationServer:
             )
 
             with torch.no_grad():
-                outputs = self.model.generate(
-                    **inputs,
-                    max_new_tokens=max_new_tokens,
-                    temperature=0.7,
-                    do_sample=True,
-                    top_p=0.9,
-                    repetition_penalty=1.1,  # Penalize repetition to avoid loops
-                    pad_token_id=self.tokenizer.eos_token_id,
-                )
+                # DeepSeek-R1 recommendations: temperature 0.5-0.7 (0.6 recommended)
+                # Check if model name contains "DeepSeek-R1" to use recommended settings
+                is_deepseek_r1 = "DeepSeek-R1" in self.model_name
+                
+                if is_deepseek_r1:
+                    # DeepSeek-R1 recommended settings
+                    outputs = self.model.generate(
+                        **inputs,
+                        max_new_tokens=max_new_tokens,
+                        temperature=0.6,  # Recommended for DeepSeek-R1
+                        do_sample=True,
+                        top_p=0.95,  # Recommended for DeepSeek-R1
+                        repetition_penalty=1.1,
+                        pad_token_id=self.tokenizer.eos_token_id,
+                    )
+                else:
+                    # Default settings for other models
+                    outputs = self.model.generate(
+                        **inputs,
+                        max_new_tokens=max_new_tokens,
+                        temperature=0.7,
+                        do_sample=True,
+                        top_p=0.9,
+                        repetition_penalty=1.1,
+                        pad_token_id=self.tokenizer.eos_token_id,
+                    )
 
             # Decode response
             generated_text = self.tokenizer.decode(
