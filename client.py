@@ -305,7 +305,7 @@ Example format:
         prompt = self._get_solution_prompt(problem)
 
         system_prompt = None
-        response = self._call_model(prompt, system_prompt, max_new_tokens=4096)
+        response = self._call_model(prompt, system_prompt, max_new_tokens=16384)
         print(f"Solution Response: {response}")
 
         step_result = {
