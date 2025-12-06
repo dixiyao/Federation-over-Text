@@ -264,6 +264,9 @@ class MathPipeline:
             output_dir=self.output_dir,
         )
         
+        # Save the encyclopedia to disk
+        self.server.save_results(result, output_dir=self.output_dir)
+        
         # Encyclopedia path
         encyclopedia_path = os.path.join(self.output_dir, "encyclopedia.txt")
         
