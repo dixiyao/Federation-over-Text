@@ -338,15 +338,19 @@ class MathPipeline:
         # Override the generation prompt to be more concise
         original_prompt_method = self.generate_server._get_generation_prompt
         
-        def optimized_prompt(query: str) -> str:
+        def optimized_prompt(query: str, is_math: bool = True) -> str:
             """Optimized prompt with minimal tokens - focuses on relevant skills"""
             # Use a very concise prompt that minimizes token usage
+            math_directive = ""
+            if is_math:
+                math_directive = "\nPlease reason step by step, and put your final answer within \\boxed{}"
+            
             prompt = f"""Skills:
 {skills_text}
 
 Q: {query}
 
-Solve using relevant skills. Be concise.
+Solve using relevant skills. Be concise.{math_directive}
 
 ## Answer:
 """
@@ -369,8 +373,8 @@ Solve using relevant skills. Be concise.
             print(f"Problem: {problem_text[:100]}...")
             
             try:
-                # Generate answer using encyclopedia
-                answer = self.generate_server.generate(problem_text)
+                # Generate answer using encyclopedia (is_math=True for math problems)
+                answer = self.generate_server.generate(problem_text, is_math=True)
                 
                 # Extract answer from response
                 answer_text = answer
