@@ -196,7 +196,7 @@ class MathPipeline:
                 continue
             
             print(f"\n[{idx}/{len(problems)}] Processing problem...")
-            print(f"Problem: {problem_text[:100]}...")
+            print(f"Problem: {problem_text}")
             
             try:
                 # Use client to extract skills from this problem
@@ -370,7 +370,7 @@ Solve using relevant skills. Be concise.{math_directive}
                 continue
             
             print(f"\n[{idx}/{len(problems)}] Solving problem...")
-            print(f"Problem: {problem_text[:100]}...")
+            print(f"Problem: {problem_text}")
             
             try:
                 # Generate answer using encyclopedia (is_math=True for math problems)
@@ -396,7 +396,7 @@ Solve using relevant skills. Be concise.{math_directive}
                 }
                 
                 results.append(result)
-                print(f"  Generated answer: {answer_text[:100]}...")
+                print(f"  Generated answer: {answer_text}")
                 
                 time.sleep(0.5)  # Rate limiting
                 
