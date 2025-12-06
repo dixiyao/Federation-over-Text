@@ -415,32 +415,64 @@ Solve using relevant skills. Be concise.
 
     def run_full_pipeline(
         self,
-        dataset1_name: str,
-        dataset2_name: str,
+        dataset1_name: Optional[str] = None,
+        dataset2_name: Optional[str] = None,
         max_dataset1: Optional[int] = None,
         max_dataset2: Optional[int] = None,
         r1: float = 0.9,
         r2: float = 0.4,
+        skills_dir: Optional[str] = None,
+        start_from_step2: bool = False,
     ) -> Dict:
         """
         Run the complete pipeline:
-        1. Learn skills from dataset1
+        1. Learn skills from dataset1 (skipped if skills_dir is provided or start_from_step2 is True)
         2. Aggregate skills
-        3. Solve dataset2 using learned skills
+        3. Solve dataset2 using learned skills (skipped if dataset2_name is None)
+        
+        Args:
+            dataset1_name: Dataset name for learning skills (required if skills_dir not provided)
+            dataset2_name: Dataset name for testing (optional, if None, skip step 3)
+            max_dataset1: Maximum number of problems from dataset1
+            max_dataset2: Maximum number of problems from dataset2
+            r1: Threshold for same skills
+            r2: Threshold for linked skills
+            skills_dir: Existing skills directory (if provided, skip step 1)
+            start_from_step2: If True, use default skills_dir (math_output/skills) and skip step 1
         
         Returns:
             Dictionary with results and statistics
         """
         start_time = time.time()
         
-        # Step 1: Learn skills from dataset1
-        skills_dir = self.learn_skills_from_dataset1(dataset1_name, max_problems=max_dataset1)
+        # Step 1: Learn skills from dataset1 (or use existing)
+        if start_from_step2:
+            # Use default skills directory
+            skills_dir = os.path.join(self.output_dir, "skills")
+            if not os.path.exists(skills_dir):
+                raise FileNotFoundError(
+                    f"Skills directory not found: {skills_dir}\n"
+                    f"Please run STEP 1 first or provide a valid --skills-dir"
+                )
+            print(f"\nSkipping STEP 1. Using existing skills from: {skills_dir}")
+        elif skills_dir:
+            # Use provided skills directory
+            if not os.path.exists(skills_dir):
+                raise FileNotFoundError(f"Skills directory not found: {skills_dir}")
+            print(f"\nSkipping STEP 1. Using existing skills from: {skills_dir}")
+        else:
+            # Run STEP 1: Learn skills from dataset1
+            if not dataset1_name:
+                raise ValueError("dataset1_name is required if skills_dir is not provided")
+            skills_dir = self.learn_skills_from_dataset1(dataset1_name, max_problems=max_dataset1)
         
         # Step 2: Aggregate skills
         encyclopedia_path = self.aggregate_skills(skills_dir, r1=r1, r2=r2)
         
-        # Step 3: Solve dataset2
-        results = self.solve_dataset2(dataset2_name, encyclopedia_path, max_problems=max_dataset2)
+        # Step 3: Solve dataset2 (optional)
+        results = []
+        if dataset2_name:
+            results = self.solve_dataset2(dataset2_name, encyclopedia_path, max_problems=max_dataset2)
         
         # Calculate statistics
         total_time = time.time() - start_time
@@ -570,6 +602,17 @@ if __name__ == "__main__":
         default=0.6,
         help="Threshold r2 for linked skills (default: 0.6)",
     )
+    parser.add_argument(
+        "--skills-dir",
+        type=str,
+        default=None,
+        help="Path to existing skills directory (if provided, skip STEP 1 and start from STEP 2)",
+    )
+    parser.add_argument(
+        "--start-from-step2",
+        action="store_true",
+        help="Start from STEP 2 using existing skills in {output_dir}/skills (default: math_output/skills)",
+    )
 
     args = parser.parse_args()
 
@@ -588,12 +631,14 @@ if __name__ == "__main__":
     try:
         # Run full pipeline
         summary = pipeline.run_full_pipeline(
-            dataset1_name=dataset1_name,
+            dataset1_name=dataset1_name if not args.start_from_step2 and not args.skills_dir else None,
             dataset2_name=dataset2_name,
             max_dataset1=args.max_dataset1,
             max_dataset2=args.max_dataset2,
             r1=args.r1,
             r2=args.r2,
+            skills_dir=args.skills_dir,
+            start_from_step2=args.start_from_step2,
         )
 
     except Exception as e:
@@ -611,8 +656,8 @@ if __name__ == "__main__":
         print("  python math_pipeline.py --dataset1 aime25 --dataset2 math500")
         print("  # With limits")
         print("  python math_pipeline.py --max-dataset1 10 --max-dataset2 50")
-        print("  # Use full paths if needed")
-        print("  python math_pipeline.py --dataset1 math_datasets/aime25.json --dataset2 math_datasets/math500.json")
-        print("\nTo download datasets:")
-        print("  python math_datasets/download_datasets.py")
+        print("  # Start from STEP 2 using existing skills")
+        print("  python math_pipeline.py --start-from-step2 --dataset2 math500")
+        print("  # Or specify custom skills directory")
+        print("  python math_pipeline.py --skills-dir math_output/skills --dataset2 math500")
 
