@@ -297,10 +297,11 @@ class MathPipeline:
         
         print(f"Loaded {len(problems)} problems from dataset '{dataset2_name}'")
         
-        # Create generate server instance
+        # Create generate server instance with smaller max_new_tokens for memory efficiency
         self.generate_server = GenerateServer(
             model_name=self.model_name,
             device=self.device,
+            max_new_tokens=2048,  # Use smaller token limit to avoid OOM
         )
         
         # Load encyclopedia
@@ -374,7 +375,13 @@ Solve using relevant skills. Be concise.{math_directive}
             
             try:
                 # Generate answer using encyclopedia (is_math=True for math problems)
-                answer = self.generate_server.generate(problem_text, is_math=True)
+                # Use max_new_tokens=2048 to avoid OOM (already set in __init__, but pass explicitly)
+                answer = self.generate_server.generate(problem_text, max_new_tokens=2048, is_math=True)
+                
+                # Clear CUDA cache periodically to prevent memory accumulation
+                if idx % 10 == 0 and self.generate_server.device == "cuda":
+                    import torch
+                    torch.cuda.empty_cache()
                 
                 # Extract answer from response
                 answer_text = answer
