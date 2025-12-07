@@ -327,30 +327,25 @@ class MathPipeline:
                 for skill in encyclopedia_json["standalone_skills"]:
                     all_skills.append(f"{skill.get('skill_name', '')}: {skill.get('description', '')}")
             
-            # Create compact skills text (limit to ~3000 chars for minimal tokens)
             skills_text = "\n".join(all_skills[:50])  # Limit to top 50 skills
-            if len(skills_text) > 3000:
-                skills_text = skills_text[:3000] + "..."
         except:
-            # Fallback: use raw encyclopedia but truncate
-            skills_text = encyclopedia_content[:3000] + "..." if len(encyclopedia_content) > 3000 else encyclopedia_content
-        
-        # Override the generation prompt to be more concise
-        original_prompt_method = self.generate_server._get_generation_prompt
+            skills_text = encyclopedia_content
         
         def optimized_prompt(query: str, is_math: bool = True) -> str:
             """Optimized prompt with minimal tokens - focuses on relevant skills"""
             # Use a very concise prompt that minimizes token usage
             math_directive = ""
             if is_math:
-                math_directive = "\nPlease reason step by step, and put your final answer within \\boxed{}"
+                math_directive = "\nPlease reason step by step, and put your final answer within \\boxed{}" 
             
-            prompt = f"""Skills:
-{skills_text}
-
+            prompt = f"""
 Q: {query}
 
-Solve using relevant skills. Be concise.{math_directive}
+{math_directive}. 
+
+You may want to refer to skills:
+{skills_text}
+and use some relevant skills related to the problem to reason step by step.
 
 ## Answer:
 """
