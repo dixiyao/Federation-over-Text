@@ -638,6 +638,17 @@ if __name__ == "__main__":
         action="store_true",
         help="Start from STEP 2 using existing skills in {output_dir}/skills (default: math_output/skills)",
     )
+    parser.add_argument(
+        "--encyclopedia",
+        type=str,
+        default=None,
+        help="Path to existing encyclopedia.txt file (if provided, skip STEP 1 and STEP 2, start from STEP 3)",
+    )
+    parser.add_argument(
+        "--start-from-step3",
+        action="store_true",
+        help="Start from STEP 3 using existing encyclopedia in {output_dir}/encyclopedia.txt (default: math_output/encyclopedia.txt)",
+    )
 
     args = parser.parse_args()
 
