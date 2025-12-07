@@ -430,6 +430,8 @@ Solve using relevant skills. Be concise.{math_directive}
         r2: float = 0.4,
         skills_dir: Optional[str] = None,
         start_from_step2: bool = False,
+        encyclopedia_path: Optional[str] = None,
+        start_from_step3: bool = False,
     ) -> Dict:
         """
         Run the complete pipeline:
@@ -452,34 +454,50 @@ Solve using relevant skills. Be concise.{math_directive}
         """
         start_time = time.time()
         
-        # Step 1: Learn skills from dataset1 (or use existing)
-        if start_from_step2:
-            # Use default skills directory
-            skills_dir = os.path.join(self.output_dir, "skills")
-            if not os.path.exists(skills_dir):
+        # Check if starting from STEP 3 (solving with existing encyclopedia)
+        if start_from_step3 or encyclopedia_path:
+            if not encyclopedia_path:
+                # Use default encyclopedia path
+                encyclopedia_path = os.path.join(self.output_dir, "encyclopedia.txt")
+            if not os.path.exists(encyclopedia_path):
                 raise FileNotFoundError(
-                    f"Skills directory not found: {skills_dir}\n"
-                    f"Please run STEP 1 first or provide a valid --skills-dir"
+                    f"Encyclopedia file not found: {encyclopedia_path}\n"
+                    f"Please provide a valid encyclopedia file or run STEP 1 and STEP 2 first"
                 )
-            print(f"\nSkipping STEP 1. Using existing skills from: {skills_dir}")
-        elif skills_dir:
-            # Use provided skills directory
-            if not os.path.exists(skills_dir):
-                raise FileNotFoundError(f"Skills directory not found: {skills_dir}")
-            print(f"\nSkipping STEP 1. Using existing skills from: {skills_dir}")
-        else:
-            # Run STEP 1: Learn skills from dataset1
-            if not dataset1_name:
-                raise ValueError("dataset1_name is required if skills_dir is not provided")
-            skills_dir = self.learn_skills_from_dataset1(dataset1_name, max_problems=max_dataset1)
-        
-        # Step 2: Aggregate skills
-        encyclopedia_path = self.aggregate_skills(skills_dir, r1=r1, r2=r2)
-        
-        # Step 3: Solve dataset2 (optional)
-        results = []
-        if dataset2_name:
+            if not dataset2_name:
+                raise ValueError("dataset2_name is required when starting from STEP 3")
+            print(f"\nSkipping STEP 1 and STEP 2. Using existing encyclopedia from: {encyclopedia_path}")
+            # Skip directly to STEP 3
             results = self.solve_dataset2(dataset2_name, encyclopedia_path, max_problems=max_dataset2)
+        else:
+            # Step 1: Learn skills from dataset1 (or use existing)
+            if start_from_step2:
+                # Use default skills directory
+                skills_dir = os.path.join(self.output_dir, "skills")
+                if not os.path.exists(skills_dir):
+                    raise FileNotFoundError(
+                        f"Skills directory not found: {skills_dir}\n"
+                        f"Please run STEP 1 first or provide a valid --skills-dir"
+                    )
+                print(f"\nSkipping STEP 1. Using existing skills from: {skills_dir}")
+            elif skills_dir:
+                # Use provided skills directory
+                if not os.path.exists(skills_dir):
+                    raise FileNotFoundError(f"Skills directory not found: {skills_dir}")
+                print(f"\nSkipping STEP 1. Using existing skills from: {skills_dir}")
+            else:
+                # Run STEP 1: Learn skills from dataset1
+                if not dataset1_name:
+                    raise ValueError("dataset1_name is required if skills_dir is not provided")
+                skills_dir = self.learn_skills_from_dataset1(dataset1_name, max_problems=max_dataset1)
+            
+            # Step 2: Aggregate skills
+            encyclopedia_path = self.aggregate_skills(skills_dir, r1=r1, r2=r2)
+            
+            # Step 3: Solve dataset2 (optional)
+            results = []
+            if dataset2_name:
+                results = self.solve_dataset2(dataset2_name, encyclopedia_path, max_problems=max_dataset2)
         
         # Calculate statistics
         total_time = time.time() - start_time
@@ -638,7 +656,7 @@ if __name__ == "__main__":
     try:
         # Run full pipeline
         summary = pipeline.run_full_pipeline(
-            dataset1_name=dataset1_name if not args.start_from_step2 and not args.skills_dir else None,
+            dataset1_name=dataset1_name if not args.start_from_step2 and not args.skills_dir and not args.start_from_step3 and not args.encyclopedia else None,
             dataset2_name=dataset2_name,
             max_dataset1=args.max_dataset1,
             max_dataset2=args.max_dataset2,
@@ -646,6 +664,8 @@ if __name__ == "__main__":
             r2=args.r2,
             skills_dir=args.skills_dir,
             start_from_step2=args.start_from_step2,
+            encyclopedia_path=args.encyclopedia,
+            start_from_step3=args.start_from_step3,
         )
 
     except Exception as e:
@@ -667,4 +687,8 @@ if __name__ == "__main__":
         print("  python math_pipeline.py --start-from-step2 --dataset2 math500")
         print("  # Or specify custom skills directory")
         print("  python math_pipeline.py --skills-dir math_output/skills --dataset2 math500")
+        print("  # Start from STEP 3 using existing encyclopedia")
+        print("  python math_pipeline.py --start-from-step3 --dataset2 math500")
+        print("  # Or specify custom encyclopedia file")
+        print("  python math_pipeline.py --encyclopedia math_output/encyclopedia.txt --dataset2 math500")
 

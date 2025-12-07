@@ -492,8 +492,9 @@ TASK: Merge Same Skills and Summarize Clusters
    - For each cluster below, create a cluster summary with:
      * Cluster topic/theme (what connects these skills)
      * Potential use cases (when to use skills from this cluster)
-     * List all skills in the cluster (DO NOT merge them - keep them separate)
+     * **REQUIRED: List ALL skills in the cluster in the "skills" array** (DO NOT merge them - keep them separate)
    - Skills in a cluster have cosine similarity between {r2} and {r1}, meaning they are related but distinct
+   - **CRITICAL: Each cluster MUST include a "skills" array containing all skills from that cluster with their full descriptions**
    - Keep them as separate entries within the cluster
 
 4. KEEP STANDALONE SKILLS
@@ -504,6 +505,8 @@ TASK: Merge Same Skills and Summarize Clusters
 
 ### Clusters (SUMMARIZE these, but keep skills separate):
 {clusters_text}
+
+**IMPORTANT**: For each cluster above, you MUST include ALL skills from that cluster in the "skills" array. Each skill should have "skill_name" and "description" fields. Do NOT omit the skills array - it is REQUIRED.
 
 ### Standalone Skills:
 {standalone_text}
@@ -530,8 +533,13 @@ Output ONLY a JSON object with this structure:
         {{
           "skill_name": "...",
           "description": "..."
+        }},
+        {{
+          "skill_name": "...",
+          "description": "..."
         }}
-      ]
+      ],
+      "standalone": false
     }}
   ],
   "standalone_skills": [
@@ -542,6 +550,12 @@ Output ONLY a JSON object with this structure:
   ]
 }}
 ```
+
+**CRITICAL REQUIREMENTS**:
+1. Every cluster MUST have a "skills" array containing ALL skills from that cluster
+2. The "skills" array cannot be empty - it must contain at least one skill object
+3. Each skill in the "skills" array must have both "skill_name" and "description" fields
+4. Do NOT omit the "skills" array from any cluster - it is REQUIRED
 
 Output ONLY the JSON object, nothing else.
 """
