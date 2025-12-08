@@ -17,9 +17,9 @@ python scraper.py -f diffusion -o data/papers/iclr23_diffusion --top5 --top25 --
 
 python client.py -t "Resolve a critical question in diffusion model and related problems according to the paper" -m deepseek-ai/DeepSeek-R1-Distill-Llama-8B -p data/papers/iclr23_diffusion -d cuda
 
-python server.py -i output -f output/paper_*.json -m deepseek-ai/DeepSeek-R1-Distill-Llama-8B -d cuda -o encyclopedia
+python server.py -i output -f math_output/problem*.json -m deepseek-ai/DeepSeek-R1-Distill-Llama-8B -d cuda -o encyclopedia
 
 python generate_server.py -e encyclopedia/encyclopedia.txt -q "Based on existing skills learned, write 5 new research papers in the field of diffusion model which should be qualified for conference at the level of ICML, NeurIPS, ICLR, etc. Write out the proper academic paper title, abstract, and introduction for each research paper." -m deepseek-ai/DeepSeek-R1-Distill-Llama-8B -d cuda -o answer.txt
 
 # Task 3 Math
-python math_pipeline.py --model deepseek-ai/DeepSeek-R1-Distill-Qwen-14B --device cuda
+python math_pipeline.py --start-from-step3  --encyclopedia encyclopedia/encyclopedia.txt --dataset2 math500 --model deepseek-ai/DeepSeek-R1-Distill-Qwen-7B --device cuda
