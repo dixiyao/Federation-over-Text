@@ -345,7 +345,7 @@ Q: {query}
 
 You may want to refer to skills:
 {skills_text}
-and use some relevant skills related to the problem to reason step by step.
+and use some relevant skills related to the problem to reason step by step. First, you need to answer the problem correctly. Second, you should use the skills to help the solution and reasoning.
 
 ## Answer:
 """
