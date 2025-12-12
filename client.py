@@ -234,66 +234,90 @@ Problem: {problem}"""
         return prompt
 
     def _get_reflection_prompt(self, problem: str, solution: str) -> str:
-        """Get the Reflection Prompt as defined in the paper"""
+        """Step 2: Extract insights and learnings from the solution"""
         prompt = f"""
-You are given:
+You are analyzing a step-by-step solution to extract key insights and learnings.
 
 Problem:
 {problem}
 
-Proposed Solution:
+Step-by-Step Solution:
 {solution}
 
-Definition:
-A **“skill”** is a general, reusable method/strategy/technique — not a one-off answer. A skill should help solve this problem and many analogous problems.
+Your task: Extract insights, learnings, and key reasoning patterns from the solution. Focus on:
+1. **What was learned**: What concepts, techniques, or strategies were used?
+2. **How it was applied**: What were the concrete steps and reasoning patterns?
+3. **Why it worked**: What insights made this approach effective?
+4. **Generalizable patterns**: What can be reused for similar problems?
 
-Your task: Produce a structured, thorough critique of the proposed solution. Your output should have **three clearly labeled sections**:  
----
+Output format (structured analysis):
 
-### I. Correctness Analysis  
-- Verify whether the solution is correct under established scientific / mathematical / physical principles.  
-- Check every calculation and algebraic step for errors.  
-- Evaluate the logical soundness and justification of each step.  
-- Assess if the reasoning is generalizable (or is overly ad-hoc to this instance).  
-- Identify any conceptual flaws, misuse of assumptions, or violations of domain context or constraints.  
-- If relevant: assess whether the solution respects ethical, contextual, or domain-specific constraints.  
+### I. Key Insights and Learnings
+- List the main insights gained from solving this problem
+- Identify the core reasoning patterns used
+- Note any "aha moments" or critical realizations
 
-### II. Missing Skills / Techniques Analysis  
-- Identify any generalizable skills or techniques (per above definition) that the author could have used but did not.  
-- For each missing skill:  
-    * Describe what the skill is.  
-    * Explain **how** using it could have simplified the solution (e.g., reduced length, improved clarity).  
-    * Explain **how** it could have prevented errors or improved robustness.  
-    * Explain **why** that skill is generally useful for this kind of problem or class of problems.  
-    * Optionally, show how a solution using that skill might look (concise sketch).  
+### II. Step-by-Step Reasoning Analysis
+- Break down the solution into logical reasoning steps
+- For each major step, explain:
+  * What technique or approach was used
+  * Why this step was necessary
+  * How it connects to the overall solution
 
-### III. New Skill Suggestions for Future Problems  
-- Propose **new, reusable skills** (techniques/approaches/heuristics) that would help with this and similar problems.  
-- For each proposed skill:  
-    * Name it with prefix `skill_`.  
-    * Provide a clear, actionable description of when and how to apply it.  
-    * Explain **why** this skill is valuable and in what kinds of problems or contexts it helps.   
+### III. Extractable Skills and Techniques
+- Identify reusable methods, strategies, or techniques from the solution
+- For each technique:
+  * Name it clearly
+  * Describe when and how it was applied
+  * Explain why it was effective
+  * Note what types of problems it could help solve
+
+Focus on extracting actionable knowledge that can guide future problem-solving.
 """
         return prompt
 
     def _get_behavior_prompt(self, problem: str, solution: str, reflection: str) -> str:
-        """Get the Behavior Prompt as defined in the paper"""
-        # Use string replacement to avoid f-string issues with curly braces in reflection
+        """Step 3: Generate actionable, instruction-based skills (like Claude Agent Skills)"""
         prompt_template = """
-You are given:
+You are creating reusable, instruction-based skills that can guide an LLM or agent to solve similar problems step-by-step.
 
-- Problem: {problem}  
-- Proposed Solution: {solution}  
-- Reflection / Critique: {reflection}
+Problem: {problem}
 
-Your task:  
-Generate a JSON object whose keys are skill names and whose values are skill descriptions. Each skill name **must** begin with `skill_`. Each skill should be a single line, and the format is "skill_[name]: [description]". Each description **must** be a **single line** (no newline characters). Do **not** invent skills outside of what can be inferred from the problem, solution, and reflection. Do **not** include any commentary or extra text — output **only** the JSON object.
+Step-by-Step Solution: {solution}
+
+Insights and Learnings: {reflection}
+
+Your task: Generate concrete, actionable skills in JSON format. Each skill should be like a mini-guide that an agent can follow.
+
+**Skill Requirements:**
+1. Each skill must be **actionable** - provide clear, step-by-step instructions
+2. Each skill must include **concrete steps** - not vague descriptions
+3. Each skill must include **insights** - explain why and when to use it
+4. Each skill must be **reusable** - applicable to similar problems, not just this one
+5. Skills should be formatted like agent skills: clear instructions that guide step-by-step reasoning
+
+**Output Format:**
+Generate a JSON object where:
+- Keys are skill names (must start with `skill_`)
+- Values are skill descriptions that include:
+  * **When to use**: Under what conditions this skill applies
+  * **Step-by-step instructions**: Concrete, actionable steps
+  * **Key insights**: Why this approach works and what to watch for
+  * **Example application**: Brief note on how it was used in this problem
+
+Each skill description should be comprehensive but concise. Use newlines within the description for readability.
 
 Example format:
 {{
-  "skill_exampleName": "Description of the skill.",
-  "skill_anotherOne": "Another skill description."
-                     }}
+  "skill_polynomialFactoring": "When to use: When solving equations with polynomial expressions that can be factored.\\n\\nStep-by-step: 1) Identify common factors or patterns (difference of squares, perfect square trinomials, etc.). 2) Apply appropriate factoring technique. 3) Set each factor equal to zero. 4) Solve resulting equations.\\n\\nKey insights: Factoring reduces complex polynomials to simpler linear/quadratic equations. Look for patterns like a²-b²=(a-b)(a+b) or x²+2ax+a²=(x+a)².\\n\\nExample: Used to factor x²-9=(x-3)(x+3) in quadratic equation solving.",
+  "skill_systematicSubstitution": "When to use: When dealing with systems of equations or complex expressions with multiple variables.\\n\\nStep-by-step: 1) Identify which variable to substitute. 2) Express one variable in terms of others from one equation. 3) Substitute into other equations. 4) Simplify and solve. 5) Back-substitute to find remaining variables.\\n\\nKey insights: Reduces multi-variable problems to single-variable problems. Choose substitutions that simplify the most.\\n\\nExample: Used to solve system by expressing y in terms of x, then substituting into second equation."
+}}
+
+**Important:**
+- Only extract skills that are actually present in the solution
+- Each skill must have concrete, actionable steps
+- Include insights that explain the reasoning behind the approach
+- Output ONLY the JSON object, no additional commentary
                 """
         prompt = prompt_template.format(
             problem=problem, solution=solution, reflection=reflection
@@ -330,7 +354,7 @@ Example format:
 
         step_result = {
             "step": 2,
-            "name": "Reflection and Critique",
+            "name": "Insight Extraction",
             "prompt": prompt,
             "response": response,
             "timestamp": time.time(),
@@ -342,18 +366,19 @@ Example format:
     def _step_behavior_extraction(
         self, problem: str, solution: str, reflection: str
     ) -> Dict:
-        """Step 3: Extract behaviors using Behavior Prompt"""
+        """Step 3: Extract actionable skills using enhanced Behavior Prompt"""
         prompt = self._get_behavior_prompt(problem, solution, reflection)
 
         system_prompt = None
-        # Step 3: Use 32768 tokens for behavior extraction (needs more tokens for comprehensive skill extraction)
+        # Step 3: Use 32768 tokens for skill extraction (needs more tokens for comprehensive, detailed skills)
         response = self._call_model(prompt, system_prompt, max_new_tokens=32768)
-        print(f"Behavior Extraction Response: {response}")
+        print(f"Skill Extraction Response: {response}")  # Print first 500 chars
 
-        # Try to parse behaviors from JSON response
-        behaviors = {}
-        formatted_json_array = None  # Store the original formatted JSON array
-
+        # Parse skills from response with validation
+        skills = {}
+        formatted_json_array = []
+        validation_errors = []
+        
         try:
             # First, try to extract JSON from markdown code blocks (```json ... ```)
             json_code_block = re.search(
@@ -362,71 +387,112 @@ Example format:
             if json_code_block:
                 json_str = json_code_block.group(1)
             else:
-                # Try to find JSON array [...]
-                json_array_match = re.search(r"\[[\s\S]*?\]", response)
-                if json_array_match:
-                    json_str = json_array_match.group(0)
+                # Try to find JSON object {...}
+                json_object_match = re.search(r"\{[\s\S]*?\}", response, re.DOTALL)
+                if json_object_match:
+                    json_str = json_object_match.group(0)
                 else:
-                    # Try to find JSON object {...}
-                    json_object_match = re.search(r"\{[\s\S]*?\}", response)
-                    if json_object_match:
-                        json_str = json_object_match.group(0)
+                    # Try to find JSON array [...]
+                    json_array_match = re.search(r"\[[\s\S]*?\]", response, re.DOTALL)
+                    if json_array_match:
+                        json_str = json_array_match.group(0)
                     else:
                         json_str = None
 
             if json_str:
                 try:
+                    # Clean up common JSON issues
+                    json_str = re.sub(r',\s*}', '}', json_str)
+                    json_str = re.sub(r',\s*]', ']', json_str)
                     json_data = json.loads(json_str)
-                    # Store the original formatted JSON array if it's an array
+                    
+                    # Handle both dict and list formats
                     if isinstance(json_data, list):
                         formatted_json_array = json_data
-                        # Also convert to behavior_book format for internal use
                         for item in json_data:
                             if isinstance(item, dict):
-                                # Handle format: {"behavior": "name", "description": "desc"}
-                                if "skill" in item and "description" in item:
-                                    skill_name = item["skill"]
-                                    # Ensure skill name starts with "skill_"
+                                skill_name = item.get("skill_name", item.get("skill", ""))
+                                skill_desc = item.get("description", "")
+                                if skill_name:
                                     if not skill_name.startswith("skill_"):
                                         skill_name = f"skill_{skill_name}"
-                                    behaviors[skill_name] = item["description"]
-                                else:
-                                    behaviors.update(item)
+                                    skills[skill_name] = skill_desc
                     elif isinstance(json_data, dict):
-                        behaviors = json_data
-
-                    if behaviors:
-                        self.behavior_book.update(behaviors)
+                        skills = json_data
+                        formatted_json_array = [
+                            {"skill_name": k, "description": v}
+                            for k, v in skills.items()
+                        ]
+                    
+                    # Validate skills
+                    validated_skills = {}
+                    for skill_name, skill_desc in skills.items():
+                        # Check if skill name starts with skill_
+                        if not skill_name.startswith("skill_"):
+                            validation_errors.append(f"Skill '{skill_name}' does not start with 'skill_' prefix")
+                            continue
+                        
+                        # Check if description is empty or too short
+                        if not skill_desc or len(skill_desc.strip()) < 20:
+                            validation_errors.append(f"Skill '{skill_name}' has empty or too short description")
+                            continue
+                        
+                        # Check if description contains actionable content
+                        skill_desc_lower = skill_desc.lower()
+                        has_steps = any(keyword in skill_desc_lower for keyword in ["step", "1)", "2)", "when to use", "how to", "instructions"])
+                        if not has_steps:
+                            validation_errors.append(f"Skill '{skill_name}' may lack concrete steps or instructions")
+                        
+                        validated_skills[skill_name] = skill_desc
+                    
+                    skills = validated_skills
+                    
                 except json.JSONDecodeError as e:
                     print(f"Warning: JSON decode error: {e}")
+                    validation_errors.append(f"JSON parsing error: {e}")
 
-            # If still no behaviors, try manual extraction
-            if not behaviors:
-                print(
-                    "Warning: Could not parse JSON from behavior extraction. Attempting manual extraction."
-                )
-                # Try to extract behaviors manually (look for behavior_* patterns)
-                behavior_pattern = (
-                    r'["\']?(behavior_\w+)["\']?\s*[:=]\s*["\']?([^"\']+)["\']?'
-                )
-                matches = re.findall(behavior_pattern, response)
+            # If still no skills, try manual extraction
+            if not skills:
+                print("Warning: Could not parse JSON from skill extraction. Attempting manual extraction.")
+                # Try to extract skills manually (look for skill_* patterns)
+                skill_pattern = r'["\']?(skill_\w+)["\']?\s*[:=]\s*["\']?([^"\']+)["\']?'
+                matches = re.findall(skill_pattern, response)
                 for name, desc in matches:
-                    behaviors[name] = desc.strip()
-                if behaviors:
-                    self.behavior_book.update(behaviors)
-
+                    if len(desc.strip()) >= 20:
+                        skills[name] = desc.strip()
+                if not skills:
+                    validation_errors.append("Could not extract any skills from response")
         except Exception as e:
-            print(f"Warning: Error parsing behaviors: {e}. Storing raw response.")
-            if not behaviors:
-                behaviors = {"raw_response": response}
+            print(f"Warning: Error parsing skills: {e}. Storing raw response.")
+            validation_errors.append(f"Exception during parsing: {e}")
+            if not skills:
+                skills = {"raw_response": response}
+        
+        # Sanity check: Ensure we have at least one valid skill
+        valid_skills = {k: v for k, v in skills.items() if k.startswith("skill_") and v and len(v.strip()) >= 20}
+        if not valid_skills:
+            print("WARNING: No valid skills extracted! Adding fallback skill.")
+            skills["skill_fallback"] = "When to use: For any problem-solving task.\\n\\nStep-by-step: 1) Carefully read and understand the problem. 2) Break down the problem into smaller sub-problems. 3) Apply relevant mathematical/analytical techniques systematically. 4) Verify each step for correctness. 5) Check the final answer.\\n\\nKey insights: Systematic approach reduces errors. Break complex problems into manageable parts.\\n\\nExample: Used as a general problem-solving framework."
+            valid_skills = {"skill_fallback": skills["skill_fallback"]}
+            formatted_json_array = [{"skill_name": "skill_fallback", "description": skills["skill_fallback"]}]
+        
+        # Report validation results
+        if validation_errors:
+            print(f"Validation warnings ({len(validation_errors)}):")
+            for error in validation_errors[:5]:  # Show first 5 errors
+                print(f"  - {error}")
+        
+        print(f"Extracted {len(valid_skills)} valid skills: {list(valid_skills.keys())}")
 
         step_result = {
             "step": 3,
-            "name": "Behavior Extraction",
+            "name": "Skill Extraction",
             "prompt": prompt,
             "response": response,
-            "behaviors": behaviors,
-            "formatted_json_array": formatted_json_array,  # Store the original formatted JSON array
+            "skills": skills,
+            "valid_skills": valid_skills,
+            "formatted_json_array": formatted_json_array,
+            "validation_errors": validation_errors,
             "timestamp": time.time(),
         }
 
@@ -477,28 +543,36 @@ Please answer the user's question based on the paper content provided above."""
         solution = step1["response"]
         time.sleep(1)  # Rate limiting
 
-        # Step 2: Reflection
-        print("Step 2: Generating reflection and critique...")
+        # Step 2: Extract Insights and Learnings
+        print("Step 2: Extracting insights and learnings from solution...")
         step2 = self._step_reflection(problem, solution)
         reflection = step2["response"]
         time.sleep(1)  # Rate limiting
 
-        # Step 3: Behavior Extraction
-        print("Step 3: Extracting behaviors...")
+        # Step 3: Skill Extraction
+        print("Step 3: Extracting actionable skills...")
         step3 = self._step_behavior_extraction(problem, solution, reflection)
         time.sleep(1)
+        
+        # Update behavior_book with extracted skills
+        extracted_skills = step3.get("valid_skills", step3.get("skills", {}))
+        if extracted_skills:
+            self.behavior_book.update(extracted_skills)
+            print(f"Added {len(extracted_skills)} skills to skill book")
+        else:
+            print("WARNING: No skills extracted from this problem!")
 
         # Compile results
         result = {
             "problem": problem,
             "task": self.task,
-            # "reasoning_steps": self.reasoning_steps,
-            # "solution": solution,
-            # "reflection": reflection,
-            # "behaviors": step3.get("behaviors", {}),
+            "solution": solution,
+            "reflection": reflection,
+            "skills_extracted": step3.get("valid_skills", step3.get("skills", {})),
+            "skills_used": list(step3.get("valid_skills", step3.get("skills", {})).keys()),
+            "validation_errors": step3.get("validation_errors", []),
             "behavior_book": self.behavior_book,
             "total_steps": len(self.reasoning_steps),
-            # "complete_reasoning": self._format_complete_reasoning(),
         }
 
         return result
@@ -753,20 +827,26 @@ if __name__ == "__main__":
             exit(1)
 
         # If --single flag is set or no papers directory specified, use legacy single mode
+        result = None
         if args.single or (args.papers_dir is None and args.num_papers is None):
             result = reader.read_paper(task=args.task)
-        reader.save_reasoning(result)
+            reader.save_reasoning(result)
 
-        print("\n" + "=" * 80)
-        print("BEHAVIOR CURATION PIPELINE COMPLETE")
-        print("=" * 80)
-        print(result["complete_reasoning"])
-        print("\n" + "=" * 80)
-        print("EXTRACTED BEHAVIORS")
-        print("=" * 80)
-        for behavior_name, behavior_desc in result.get("behavior_book", {}).items():
-            print(f"\n{behavior_name}: {behavior_desc}")
-        print("\n" + "=" * 80)
+        if result:
+            print("\n" + "=" * 80)
+            print("SKILL CURATION PIPELINE COMPLETE")
+            print("=" * 80)
+            print(f"Solution: {result.get('solution', 'N/A')}")
+            print(f"\nSkills Extracted: {len(result.get('skills_extracted', {}))}")
+            print(f"Skills Used: {result.get('skills_used', [])}")
+            if result.get('validation_errors'):
+                print(f"Validation Warnings: {len(result.get('validation_errors', []))}")
+            print("\n" + "=" * 80)
+            print("EXTRACTED SKILLS")
+            print("=" * 80)
+            for skill_name, skill_desc in result.get("behavior_book", {}).items():
+                print(f"\n{skill_name}: {skill_desc}")
+            print("\n" + "=" * 80)
 
     except Exception as e:
         print(f"Error: {e}")

@@ -19,6 +19,13 @@ from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+try:
+    import networkx as nx
+    HAS_NETWORKX = True
+except ImportError:
+    HAS_NETWORKX = False
+    print("Warning: networkx not installed. GraphRAG features will be limited.")
+
 
 class SkillAggregationServer:
     """
@@ -327,9 +334,9 @@ class SkillAggregationServer:
         # Map from [-1, 1] to [0, 1]
         similarity_matrix = (similarity_matrix + 1) / 2
         
-        # Build graph: same skills (r1 threshold) and linked skills (r2 threshold)
-        same_skills = defaultdict(set)  # Groups of identical skills
-        graph_edges = []  # Edges for clustering
+        # Build graph: nodes are skills, edges are linked skills (r2 <= similarity < r1)
+        same_skills = defaultdict(set)  # Groups of identical skills (similarity >= r1)
+        graph_edges = []  # Edges for linked skills (r2 <= similarity < r1)
         skill_to_group = {}  # Map skill to its same_skills group
         
         print(f"Building graph with thresholds: r1={r1} (same skill), r2={r2} (linked)")
@@ -338,7 +345,7 @@ class SkillAggregationServer:
                 sim = similarity_matrix[i][j]
                 
                 if sim >= r1:
-                    # Same skill - merge into group
+                    # Same skill - merge into group (not added as edge)
                     if i not in skill_to_group and j not in skill_to_group:
                         # Create new group
                         group_id = len(same_skills)
@@ -357,43 +364,46 @@ class SkillAggregationServer:
                         same_skills[group_id].add(i)
                         skill_to_group[i] = group_id
                 elif sim >= r2:
-                    # Linked skills - add edge
+                    # Linked skills - add edge (r2 <= similarity < r1)
                     graph_edges.append((i, j, sim))
         
-        # Build adjacency list for clustering
+        # Build clusters from connected components in the graph
+        # Each connected component is a cluster
+        print("Building clusters from graph connected components...")
         adjacency = defaultdict(set)
         for i, j, sim in graph_edges:
             adjacency[i].add(j)
             adjacency[j].add(i)
         
-        # Cluster skills within 2 hops
-        print("Clustering skills within 2 hops...")
+        # Find connected components (clusters)
         clusters = []
         visited = set()
         
-        def get_2hop_neighbors(node: int) -> Set[int]:
-            """Get all nodes within 2 hops of a given node"""
-            neighbors = {node}
-            # 1-hop neighbors
-            if node in adjacency:
-                neighbors.update(adjacency[node])
-            # 2-hop neighbors
-            for neighbor in list(neighbors):
-                if neighbor in adjacency:
-                    neighbors.update(adjacency[neighbor])
-            return neighbors
+        def get_connected_component(node: int) -> Set[int]:
+            """Get all nodes in the connected component"""
+            component = set()
+            stack = [node]
+            while stack:
+                current = stack.pop()
+                if current in visited:
+                    continue
+                visited.add(current)
+                component.add(current)
+                if current in adjacency:
+                    for neighbor in adjacency[current]:
+                        if neighbor not in visited:
+                            stack.append(neighbor)
+            return component
         
         for i in range(len(skill_names)):
             if i in visited:
                 continue
             
-            # Get 2-hop cluster
-            cluster_nodes = get_2hop_neighbors(i)
-            cluster_nodes = {n for n in cluster_nodes if n not in visited}
+            # Get connected component
+            component = get_connected_component(i)
             
-            if len(cluster_nodes) > 1:  # Only create cluster if more than 1 node
-                clusters.append(cluster_nodes)
-                visited.update(cluster_nodes)
+            if len(component) > 1:  # Only create cluster if more than 1 node
+                clusters.append(component)
         
         # Convert to skill names
         same_skills_groups = {
@@ -407,7 +417,13 @@ class SkillAggregationServer:
         ]
         
         print(f"Found {len(same_skills_groups)} groups of identical skills")
-        print(f"Found {len(clusters_named)} clusters")
+        print(f"Found {len(clusters_named)} clusters (connected components)")
+        
+        # Build GraphRAG database
+        graphrag_data = self._build_graphrag_database(
+            skill_names, skill_store, embeddings_norm, similarity_matrix, 
+            same_skills_groups, clusters_named, graph_edges, r1, r2
+        )
         
         step_result = {
             "step": 2,
@@ -416,11 +432,91 @@ class SkillAggregationServer:
             "clusters": clusters_named,
             "similarity_matrix": similarity_matrix.tolist(),
             "graph_edges": [(skill_names[i], skill_names[j], float(sim)) for i, j, sim in graph_edges],
+            "graphrag_data": graphrag_data,
             "timestamp": time.time(),
         }
         
         self.aggregation_steps.append(step_result)
         return step_result
+
+    def _build_graphrag_database(
+        self, skill_names: List[str], skill_store: Dict, embeddings: np.ndarray,
+        similarity_matrix: np.ndarray, same_skills_groups: Dict, clusters: List[List[str]],
+        graph_edges: List[Tuple[int, int, float]], r1: float, r2: float
+    ) -> Dict:
+        """Build GraphRAG database with graph structure and embeddings"""
+        print("Building GraphRAG database...")
+        
+        # Create graph structure
+        if HAS_NETWORKX:
+            G = nx.Graph()
+        else:
+            G = None
+        
+        # Add nodes (skills)
+        nodes = {}
+        for idx, skill_name in enumerate(skill_names):
+            node_data = {
+                "skill_name": skill_name,
+                "description": skill_store[skill_name],
+                "embedding": embeddings[idx].tolist(),  # Store normalized embedding
+                "index": idx,
+            }
+            nodes[skill_name] = node_data
+            if G is not None:
+                G.add_node(skill_name, **node_data)
+        
+        # Add edges based on similarity
+        edges = []
+        for i, j, sim in graph_edges:
+            skill_i = skill_names[i]
+            skill_j = skill_names[j]
+            edge_type = "same" if sim >= r1 else "linked"
+            edge_data = {
+                "similarity": float(sim),
+                "type": edge_type,
+            }
+            edges.append({
+                "source": skill_i,
+                "target": skill_j,
+                **edge_data
+            })
+            if G is not None:
+                G.add_edge(skill_i, skill_j, **edge_data)
+        
+        # Store same skills groups as node attributes
+        for group_id, group_skills in same_skills_groups.items():
+            for skill_name in group_skills:
+                if skill_name in nodes:
+                    nodes[skill_name]["same_skills_group"] = group_id
+                    if G is not None:
+                        G.nodes[skill_name]["same_skills_group"] = group_id
+        
+        # Store cluster information
+        for cluster_id, cluster_skills in enumerate(clusters):
+            for skill_name in cluster_skills:
+                if skill_name in nodes:
+                    if "clusters" not in nodes[skill_name]:
+                        nodes[skill_name]["clusters"] = []
+                    nodes[skill_name]["clusters"].append(cluster_id)
+                    if G is not None:
+                        if "clusters" not in G.nodes[skill_name]:
+                            G.nodes[skill_name]["clusters"] = []
+                        G.nodes[skill_name]["clusters"].append(cluster_id)
+        
+        graphrag_data = {
+            "nodes": nodes,
+            "edges": edges,
+            "same_skills_groups": same_skills_groups,
+            "clusters": {i: cluster for i, cluster in enumerate(clusters)},
+            "r1": r1,
+            "r2": r2,
+            "similarity_matrix": similarity_matrix.tolist(),
+            "graph_format": "networkx" if HAS_NETWORKX else "dict",
+        }
+        
+        print(f"GraphRAG database built: {len(nodes)} nodes, {len(edges)} edges")
+        return graphrag_data
 
     def _get_cluster_summary_prompt(
         self, same_skills_groups: Dict, clusters: List[List[str]], skill_store: Dict, existing_encyclopedia: str = "", r1: float = 0.9, r2: float = 0.4
@@ -645,10 +741,29 @@ Output ONLY the JSON object, nothing else.
                 print(f"Warning: Could not load existing encyclopedia: {e}")
         return ""
 
+    def _save_graphrag_database(self, graphrag_data: Dict, output_dir: str):
+        """Save GraphRAG database to disk"""
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Save as JSON (embeddings will be large but manageable)
+        graphrag_path = os.path.join(output_dir, "graphrag_db.json")
+        with open(graphrag_path, "w", encoding="utf-8") as f:
+            json.dump(graphrag_data, f, indent=2, ensure_ascii=False)
+        
+        # Also save embeddings separately as numpy array for faster loading
+        embeddings_path = os.path.join(output_dir, "graphrag_embeddings.npy")
+        embeddings_list = [node["embedding"] for node in graphrag_data["nodes"].values()]
+        if embeddings_list:
+            embeddings_array = np.array(embeddings_list)
+            np.save(embeddings_path, embeddings_array)
+        
+        print("GraphRAG database saved to:")
+        print(f"  - {graphrag_path}")
+        print(f"  - {embeddings_path}")
+
     def aggregate_and_build_encyclopedia(
         self,
         json_files: Optional[List[str]] = None,
-        incremental: bool = False,
         r1: float = 0.9,
         r2: float = 0.4,
         output_dir: str = "build/log",
@@ -658,7 +773,6 @@ Output ONLY the JSON object, nothing else.
 
         Args:
             json_files: List of JSON file paths. If None, scans input_dir.
-            incremental: If True, processes files incrementally. If False, processes all at once.
             r1: Threshold for same skills (cosine similarity >= r1 means same skill).
             r2: Threshold for linked skills (r2 <= similarity < r1 means linked).
             output_dir: Output directory to check for existing encyclopedia.
@@ -693,15 +807,21 @@ Output ONLY the JSON object, nothing else.
         clusters = clustering_result["clusters"]
         time.sleep(1)
 
-        # Step 3: Merge Same Skills and Summarize Clusters
+        # Step 3: Save GraphRAG database and merge/summarize
         print("\n" + "=" * 80)
-        print("STEP 3: Merging Same Skills and Summarizing Clusters")
+        print("STEP 3: Saving GraphRAG Database and Merging Skills")
         print("=" * 80)
+        
+        # Save GraphRAG database
+        graphrag_data = clustering_result.get("graphrag_data", {})
+        if graphrag_data:
+            self._save_graphrag_database(graphrag_data, output_dir)
+        
         # Load existing encyclopedia if it exists
         existing_encyclopedia = self._load_existing_encyclopedia(output_dir)
         if existing_encyclopedia:
             print("Found existing encyclopedia - will merge with new skills")
-        summary_result = self._step_cluster_summary(same_skills_groups, clusters, self.skill_store, existing_encyclopedia, r1=r1, r2=r2)
+        self._step_cluster_summary(same_skills_groups, clusters, self.skill_store, existing_encyclopedia, r1=r1, r2=r2)
 
         # Compile results
         result = {
