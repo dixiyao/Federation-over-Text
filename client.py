@@ -408,21 +408,91 @@ Example format:
                     
                     # Handle both dict and list formats
                     if isinstance(json_data, list):
-                        formatted_json_array = json_data
+                        formatted_json_array = []
                         for item in json_data:
                             if isinstance(item, dict):
                                 skill_name = item.get("skill_name", item.get("skill", ""))
                                 skill_desc = item.get("description", "")
+                                
+                                # Handle nested skill structure in list format
+                                if isinstance(skill_desc, dict):
+                                    when_to_use = skill_desc.get("when_to_use", skill_desc.get("when to use", ""))
+                                    step_by_step = skill_desc.get("step_by_step_instructions", skill_desc.get("step-by-step", skill_desc.get("step_by_step", [])))
+                                    key_insights = skill_desc.get("key_insights", skill_desc.get("key insights", skill_desc.get("insights", [])))
+                                    example = skill_desc.get("example_application", skill_desc.get("example application", skill_desc.get("example", "")))
+                                    
+                                    # Format step-by-step instructions
+                                    if isinstance(step_by_step, list):
+                                        step_text = "\n".join([f"{i+1}) {step}" if not step.strip().startswith(str(i+1)) else step for i, step in enumerate(step_by_step)])
+                                    else:
+                                        step_text = str(step_by_step)
+                                    
+                                    # Format key insights
+                                    if isinstance(key_insights, list):
+                                        insights_text = "\n".join([f"- {insight}" for insight in key_insights])
+                                    else:
+                                        insights_text = str(key_insights)
+                                    
+                                    # Build formatted description
+                                    desc_parts = []
+                                    if when_to_use:
+                                        desc_parts.append(f"When to use: {when_to_use}")
+                                    if step_text:
+                                        desc_parts.append(f"\nStep-by-step:\n{step_text}")
+                                    if insights_text:
+                                        desc_parts.append(f"\nKey insights:\n{insights_text}")
+                                    if example:
+                                        desc_parts.append(f"\nExample: {example}")
+                                    
+                                    skill_desc = "\n".join(desc_parts)
+                                
                                 if skill_name:
                                     if not skill_name.startswith("skill_"):
                                         skill_name = f"skill_{skill_name}"
                                     skills[skill_name] = skill_desc
+                                    formatted_json_array.append({"skill_name": skill_name, "description": skill_desc})
                     elif isinstance(json_data, dict):
-                        skills = json_data
-                        formatted_json_array = [
-                            {"skill_name": k, "description": v}
-                            for k, v in skills.items()
-                        ]
+                        skills = {}
+                        formatted_json_array = []
+                        for k, v in json_data.items():
+                            # Handle nested skill structure (dict with when_to_use, step_by_step_instructions, etc.)
+                            if isinstance(v, dict):
+                                # Convert nested dict to formatted string
+                                when_to_use = v.get("when_to_use", v.get("when to use", ""))
+                                step_by_step = v.get("step_by_step_instructions", v.get("step-by-step", v.get("step_by_step", [])))
+                                key_insights = v.get("key_insights", v.get("key insights", v.get("insights", [])))
+                                example = v.get("example_application", v.get("example application", v.get("example", "")))
+                                
+                                # Format step-by-step instructions
+                                if isinstance(step_by_step, list):
+                                    step_text = "\n".join([f"{i+1}) {step}" if not step.strip().startswith(str(i+1)) else step for i, step in enumerate(step_by_step)])
+                                else:
+                                    step_text = str(step_by_step)
+                                
+                                # Format key insights
+                                if isinstance(key_insights, list):
+                                    insights_text = "\n".join([f"- {insight}" for insight in key_insights])
+                                else:
+                                    insights_text = str(key_insights)
+                                
+                                # Build formatted description
+                                desc_parts = []
+                                if when_to_use:
+                                    desc_parts.append(f"When to use: {when_to_use}")
+                                if step_text:
+                                    desc_parts.append(f"\nStep-by-step:\n{step_text}")
+                                if insights_text:
+                                    desc_parts.append(f"\nKey insights:\n{insights_text}")
+                                if example:
+                                    desc_parts.append(f"\nExample: {example}")
+                                
+                                formatted_desc = "\n".join(desc_parts)
+                                skills[k] = formatted_desc
+                                formatted_json_array.append({"skill_name": k, "description": formatted_desc})
+                            else:
+                                # Simple string description
+                                skills[k] = v
+                                formatted_json_array.append({"skill_name": k, "description": v})
                     
                     # Validate skills
                     validated_skills = {}
@@ -432,8 +502,17 @@ Example format:
                             validation_errors.append(f"Skill '{skill_name}' does not start with 'skill_' prefix")
                             continue
                         
+                        # Handle non-string descriptions (convert dict/list to string)
+                        if isinstance(skill_desc, dict):
+                            # If it's a dict, try to extract description or convert to JSON string
+                            skill_desc = skill_desc.get("description", str(skill_desc))
+                        elif isinstance(skill_desc, list):
+                            skill_desc = " ".join(str(item) for item in skill_desc)
+                        elif not isinstance(skill_desc, str):
+                            skill_desc = str(skill_desc)
+                        
                         # Check if description is empty or too short
-                        if not skill_desc or len(skill_desc.strip()) < 20:
+                        if not skill_desc or not isinstance(skill_desc, str) or len(skill_desc.strip()) < 20:
                             validation_errors.append(f"Skill '{skill_name}' has empty or too short description")
                             continue
                         
@@ -469,7 +548,21 @@ Example format:
                 skills = {"raw_response": response}
         
         # Sanity check: Ensure we have at least one valid skill
-        valid_skills = {k: v for k, v in skills.items() if k.startswith("skill_") and v and len(v.strip()) >= 20}
+        # Filter valid skills, handling non-string values
+        valid_skills = {}
+        for k, v in skills.items():
+            if not k.startswith("skill_"):
+                continue
+            # Convert non-string values to strings
+            if isinstance(v, dict):
+                v = v.get("description", str(v))
+            elif isinstance(v, list):
+                v = " ".join(str(item) for item in v)
+            elif not isinstance(v, str):
+                v = str(v)
+            # Check if valid string with sufficient length
+            if v and isinstance(v, str) and len(v.strip()) >= 20:
+                valid_skills[k] = v
         if not valid_skills:
             print("WARNING: No valid skills extracted! Adding fallback skill.")
             skills["skill_fallback"] = "When to use: For any problem-solving task.\\n\\nStep-by-step: 1) Carefully read and understand the problem. 2) Break down the problem into smaller sub-problems. 3) Apply relevant mathematical/analytical techniques systematically. 4) Verify each step for correctness. 5) Check the final answer.\\n\\nKey insights: Systematic approach reduces errors. Break complex problems into manageable parts.\\n\\nExample: Used as a general problem-solving framework."
