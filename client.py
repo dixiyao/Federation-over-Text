@@ -831,22 +831,53 @@ if __name__ == "__main__":
         if args.single or (args.papers_dir is None and args.num_papers is None):
             result = reader.read_paper(task=args.task)
             reader.save_reasoning(result)
-
-        if result:
-            print("\n" + "=" * 80)
-            print("SKILL CURATION PIPELINE COMPLETE")
+            
+            if result:
+                print("\n" + "=" * 80)
+                print("SKILL CURATION PIPELINE COMPLETE")
+                print("=" * 80)
+                print(f"Solution: {result.get('solution', 'N/A')[:200]}...")
+                print(f"\nSkills Extracted: {len(result.get('skills_extracted', {}))}")
+                print(f"Skills Used: {result.get('skills_used', [])}")
+                if result.get('validation_errors'):
+                    print(f"Validation Warnings: {len(result.get('validation_errors', []))}")
+                print("\n" + "=" * 80)
+                print("EXTRACTED SKILLS")
+                print("=" * 80)
+                for skill_name, skill_desc in result.get("behavior_book", {}).items():
+                    print(f"\n{skill_name}: {skill_desc[:200]}...")
+                print("\n" + "=" * 80)
+        else:
+            # Process multiple papers
+            papers_dir = args.papers_dir or reader.papers_dir
+            if not papers_dir:
+                print("Error: Please provide a papers directory using -p or --papers-dir")
+                print("Example: python client.py -t 'Question' -p data/papers/iclr23_top5 -n 10")
+                exit(1)
+            
+            print(f"Processing papers from: {papers_dir}")
+            print(f"Number of papers: {args.num_papers or 'all'}")
             print("=" * 80)
-            print(f"Solution: {result.get('solution', 'N/A')}")
-            print(f"\nSkills Extracted: {len(result.get('skills_extracted', {}))}")
-            print(f"Skills Used: {result.get('skills_used', [])}")
-            if result.get('validation_errors'):
-                print(f"Validation Warnings: {len(result.get('validation_errors', []))}")
-            print("\n" + "=" * 80)
-            print("EXTRACTED SKILLS")
-            print("=" * 80)
-            for skill_name, skill_desc in result.get("behavior_book", {}).items():
-                print(f"\n{skill_name}: {skill_desc}")
-            print("\n" + "=" * 80)
+            
+            results = reader.process_multiple_papers(
+                question=args.task,
+                papers_dir=papers_dir,
+                num_papers=args.num_papers
+            )
+            
+            if results:
+                print("\n" + "=" * 80)
+                print("ALL PAPERS PROCESSED")
+                print("=" * 80)
+                print(f"Total papers processed: {len(results)}")
+                total_skills = sum(len(r.get('behavior_book', {})) for r in results)
+                print(f"Total skills extracted: {total_skills}")
+                print("=" * 80)
+            else:
+                print("\nNo papers were processed. Check that:")
+                print(f"1. Directory exists: {papers_dir}")
+                print("2. Directory contains PDF files")
+                print("3. Files are readable")
 
     except Exception as e:
         print(f"Error: {e}")
