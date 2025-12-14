@@ -9,6 +9,7 @@ import json
 import os
 import re
 import time
+import warnings
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
@@ -18,6 +19,10 @@ import torch
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from transformers import AutoModelForCausalLM, AutoTokenizer
+
+# Suppress transformers loading warnings for embedding models
+warnings.filterwarnings("ignore", message=".*UNEXPECTED.*")
+warnings.filterwarnings("ignore", message=".*Materializing param.*")
 
 try:
     import networkx as nx
@@ -299,7 +304,20 @@ class SkillAggregationServer:
         
         try:
             print(f"Loading embedding model: {self.embedding_model_name}")
-            self.embedding_model = SentenceTransformer(self.embedding_model_name, device=self.device)
+            # Suppress transformers loading warnings and progress bars
+            import logging
+            # Suppress transformers warnings
+            os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+            logging.getLogger("transformers.modeling_utils").setLevel(logging.ERROR)
+            logging.getLogger("transformers.configuration_utils").setLevel(logging.ERROR)
+            
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                self.embedding_model = SentenceTransformer(
+                    self.embedding_model_name, 
+                    device=self.device,
+                    show_progress_bar=False
+                )
             print("Embedding model loaded successfully!")
         except ImportError:
             raise ImportError(
