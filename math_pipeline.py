@@ -302,55 +302,15 @@ class MathPipeline:
             device=self.device,
         )
         
-        # Load encyclopedia
+        # Load encyclopedia (this will automatically load GraphRAG database if available)
         self.generate_server.load_encyclopedia(encyclopedia_path)
         
-        # Optimize prompt for minimal tokens while maintaining effectiveness
-        # Load and parse encyclopedia to extract only relevant skills
-        with open(encyclopedia_path, "r", encoding="utf-8") as f:
-            encyclopedia_content = f.read()
-        
-        # Try to parse as JSON to extract skills more intelligently
-        try:
-            encyclopedia_json = json.loads(encyclopedia_content)
-            # Extract skills from JSON structure
-            all_skills = []
-            if "merged_skills" in encyclopedia_json:
-                for skill in encyclopedia_json["merged_skills"]:
-                    all_skills.append(f"{skill.get('skill_name', '')}: {skill.get('description', '')}")
-            if "clusters" in encyclopedia_json:
-                for cluster in encyclopedia_json["clusters"]:
-                    for skill in cluster.get("skills", []):
-                        all_skills.append(f"{skill.get('skill_name', '')}: {skill.get('description', '')}")
-            if "standalone_skills" in encyclopedia_json:
-                for skill in encyclopedia_json["standalone_skills"]:
-                    all_skills.append(f"{skill.get('skill_name', '')}: {skill.get('description', '')}")
-            
-            skills_text = "\n".join(all_skills[:50])  # Limit to top 50 skills
-        except:
-            skills_text = encyclopedia_content
-        
-        def optimized_prompt(query: str, is_math: bool = True) -> str:
-            """Optimized prompt with minimal tokens - focuses on relevant skills"""
-            # Use a very concise prompt that minimizes token usage
-            math_directive = ""
-            if is_math:
-                math_directive = "\nPlease reason step by step, and put your final answer within \\boxed{}" 
-            
-            prompt = f"""
-Q: {query}
-
-{math_directive}. 
-
-You may want to refer to skills:
-{skills_text}
-and use some relevant skills related to the problem to reason step by step. First, you need to answer the problem correctly. Second, you should use the skills to help the solution and reasoning.
-
-## Answer:
-"""
-            return prompt
-        
-        self.generate_server._get_generation_prompt = optimized_prompt
+        # Note: GraphRAG is automatically used by generate_server.py
+        # The _get_generation_prompt method in generate_server.py will:
+        # 1. Use GraphRAG to retrieve relevant skills based on the query
+        # 2. Format them appropriately
+        # 3. Include them in the prompt
+        # No need to override it - GraphRAG handles skill retrieval automatically
         
         # Solve each problem
         results = []
