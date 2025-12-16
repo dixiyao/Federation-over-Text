@@ -314,15 +314,6 @@ Each skill description must contain these four sections:
    - Each step should be clear and executable
    - Include decision points if applicable
 
-3. **Key insights and guidelines**: Why this approach works and important considerations
-   - What makes this technique effective?
-   - What should be watched for or avoided?
-   - Any important nuances or edge cases?
-
-4. **Example application**: How this skill was used in the current problem
-   - Brief, concrete example from the solution
-   - Shows the skill in action
-
 **Output Format:**
 Simple JSON object: {{"skill_name": "description"}}
 - Skill name must start with "skill_"
@@ -332,8 +323,8 @@ Simple JSON object: {{"skill_name": "description"}}
 
 **Example Format:**
 {{
-  "skill_polynomialFactoring": "When to use: When solving equations with polynomial expressions that can be factored, especially when the polynomial has recognizable patterns like difference of squares or perfect square trinomials.\\n\\nStep-by-step: 1) Examine the polynomial structure to identify common patterns (difference of squares: a²-b², perfect square trinomials: a²±2ab+b², common factors) 2) Apply the appropriate factoring technique based on the identified pattern 3) Set each factor equal to zero to create simpler equations 4) Solve the resulting linear or quadratic equations 5) Verify solutions by substituting back into the original equation\\n\\nKey insights: Factoring reduces complex polynomials to simpler equations that are easier to solve. Always look for patterns first before attempting brute force methods. Common patterns include a²-b²=(a-b)(a+b) and x²+2ax+a²=(x+a)². Watch for cases where factoring is not possible - in those cases, use other methods like the quadratic formula.\\n\\nExample: Used to factor x²-9=(x-3)(x+3) in the equation x²-9=0, which simplified to solving x-3=0 and x+3=0.",
-  "skill_systematicSubstitution": "When to use: When dealing with systems of equations or complex expressions with multiple variables where one variable can be expressed in terms of others, making the problem more manageable.\\n\\nStep-by-step: 1) Identify which variable to substitute by finding the simplest relationship 2) Express one variable in terms of others from one equation 3) Substitute this expression into other equations in the system 4) Simplify the resulting equation(s) to reduce the number of variables 5) Solve for the remaining variable(s) 6) Back-substitute to find the values of all variables 7) Verify the solution satisfies all original equations\\n\\nKey insights: Substitution reduces multi-variable problems to single-variable problems, making them easier to solve. Choose the substitution that simplifies the most complex parts first. Always verify solutions by checking all original equations. Be careful with sign errors during substitution.\\n\\nExample: Used to solve the system by expressing y=2x+1 from the first equation, then substituting into the second equation 3x+2(2x+1)=7 to get 7x+2=7, solving for x=5/7, then back-substituting to find y."
+  "skill_polynomialFactoring": "When to use: When solving equations with polynomial expressions that can be factored, especially when the polynomial has recognizable patterns like difference of squares or perfect square trinomials.\\n\\nStep-by-step: 1) Examine the polynomial structure to identify common patterns (difference of squares: a²-b², perfect square trinomials: a²±2ab+b², common factors) 2) Apply the appropriate factoring technique based on the identified pattern 3) Set each factor equal to zero to create simpler equations 4) Solve the resulting linear or quadratic equations 5) Verify solutions by substituting back into the original equation",
+  "skill_systematicSubstitution": "When to use: When dealing with systems of equations or complex expressions with multiple variables where one variable can be expressed in terms of others, making the problem more manageable.\\n\\nStep-by-step: 1) Identify which variable to substitute by finding the simplest relationship 2) Express one variable in terms of others from one equation 3) Substitute this expression into other equations in the system 4) Simplify the resulting equation(s) to reduce the number of variables 5) Solve for the remaining variable(s) 6) Back-substitute to find the values of all variables 7) Verify the solution satisfies all original equations."
 }}
 
 **CRITICAL Rules:**
