@@ -193,8 +193,8 @@ class ChainOfThoughtReader:
                 
                 if is_deepseek_r1:
                     # DeepSeek-R1 recommended settings
-                outputs = self.model.generate(
-                    **inputs,
+                    outputs = self.model.generate(
+                        **inputs,
                         max_new_tokens=max_new_tokens,
                         do_sample=True,
                         top_p=0.9,
@@ -208,12 +208,12 @@ class ChainOfThoughtReader:
                     outputs = self.model.generate(
                         **inputs,
                         max_new_tokens=max_new_tokens,
-                    temperature=0.7,
-                    do_sample=True,
-                    top_p=0.9,
+                        temperature=0.7,
+                        do_sample=True,
+                        top_p=0.9,
                         repetition_penalty=1.2,  # Penalize repetition to avoid loops
-                    pad_token_id=self.tokenizer.eos_token_id,
-                )
+                        pad_token_id=self.tokenizer.eos_token_id,
+                    )
             
             # Decode response
             generated_text = self.tokenizer.decode(
@@ -1038,12 +1038,12 @@ if __name__ == "__main__":
         result = None
         if args.single or (args.papers_dir is None and args.num_papers is None):
             result = reader.read_paper(task=args.task)
-        reader.save_reasoning(result)
-
+            reader.save_reasoning(result)
+            
             if result:
-        print("\n" + "=" * 80)
+                print("\n" + "=" * 80)
                 print("SKILL CURATION PIPELINE COMPLETE")
-        print("=" * 80)
+                print("=" * 80)
                 print(f"Solution: {result.get('solution', 'N/A')[:200]}...")
                 print(f"\nSkills Extracted: {len(result.get('skills_extracted', {}))}")
                 print(f"Skills Used: {result.get('skills_used', [])}")
@@ -1074,13 +1074,13 @@ if __name__ == "__main__":
             )
             
             if results:
-        print("\n" + "=" * 80)
+                print("\n" + "=" * 80)
                 print("ALL PAPERS PROCESSED")
                 print("=" * 80)
                 print(f"Total papers processed: {len(results)}")
                 total_skills = sum(len(r.get('behavior_book', {})) for r in results)
                 print(f"Total skills extracted: {total_skills}")
-        print("=" * 80)
+                print("=" * 80)
             else:
                 print("\nNo papers were processed. Check that:")
                 print(f"1. Directory exists: {papers_dir}")
