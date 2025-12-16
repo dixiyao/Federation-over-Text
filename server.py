@@ -313,11 +313,14 @@ class SkillAggregationServer:
             
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
+                # Ensure device is properly set for embedding model
+                embedding_device = self.device if self.device else ("cuda" if torch.cuda.is_available() else "cpu")
                 self.embedding_model = SentenceTransformer(
                     self.embedding_model_name, 
-                    device=self.device,
+                    device=embedding_device,
                     show_progress_bar=False
                 )
+                print(f"Embedding model device: {embedding_device}")
             print("Embedding model loaded successfully!")
         except ImportError:
             raise ImportError(
@@ -339,7 +342,15 @@ class SkillAggregationServer:
         
         # Compute embeddings
         print(f"Computing embeddings for {len(skill_texts)} skills...")
-        embeddings = self.embedding_model.encode(skill_texts, convert_to_numpy=True, show_progress_bar=True)
+        # Use show_progress_bar based on environment - disable in non-interactive environments
+        import sys
+        show_progress = sys.stdout.isatty()  # Only show progress bar if running in terminal
+        embeddings = self.embedding_model.encode(
+            skill_texts, 
+            convert_to_numpy=True, 
+            show_progress_bar=show_progress,
+            batch_size=32  # Process in batches for better performance
+        )
         
         # Normalize embeddings for cosine similarity
         embeddings_norm = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
