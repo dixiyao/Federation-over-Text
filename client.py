@@ -198,7 +198,7 @@ class ChainOfThoughtReader:
                         max_new_tokens=max_new_tokens,
                         do_sample=True,
                         top_p=0.9,
-                        temperature=0.7,
+                        temperature=0,
                         repetition_penalty=1.2,
                         use_cache=True,
                         pad_token_id=self.tokenizer.eos_token_id,
@@ -208,7 +208,7 @@ class ChainOfThoughtReader:
                     outputs = self.model.generate(
                         **inputs,
                         max_new_tokens=max_new_tokens,
-                        temperature=0.7,
+                        temperature=0,
                         do_sample=True,
                         top_p=0.9,
                         repetition_penalty=1.2,  # Penalize repetition to avoid loops
