@@ -205,18 +205,25 @@ class MathPipeline:
                 # Save skill book for this problem
                 skill_book = result.get("behavior_book", {})
                 if skill_book:
-                    output_data = {
-                        "problem": problem_text,
-                        "problem_id": problem_data.get("id", idx),
-                        "behaviors": [
-                            {
-                                "behavior": name.replace("behavior_", ""),
-                                "description": desc
-                            }
-                            for name, desc in skill_book.items()
-                        ],
-                        "behavior_book": skill_book,
-                    }
+                    # Filter out any fallback skills that might have been added
+                    skill_book = {k: v for k, v in skill_book.items() if not k.startswith("skill_fallback")}
+                    
+                    if skill_book:  # Only save if there are valid skills
+                        output_data = {
+                            "problem": problem_text,
+                            "problem_id": problem_data.get("id", idx),
+                            "behaviors": [
+                                {
+                                    "behavior": name.replace("skill_", "").replace("behavior_", ""),
+                                    "description": desc
+                                }
+                                for name, desc in skill_book.items()
+                            ],
+                            "behavior_book": skill_book,
+                        }
+                    else:
+                        print("  No valid skills extracted (only fallback found)")
+                        continue
                     
                     output_path = os.path.join(skills_output_dir, f"problem_{idx:04d}.json")
                     with open(output_path, "w", encoding="utf-8") as f:
@@ -224,7 +231,7 @@ class MathPipeline:
                     
                     print(f"  Extracted {len(skill_book)} skills -> {output_path}")
                 else:
-                    print(f"  No skills extracted from this problem")
+                    print("  No skills extracted from this problem")
                 
                 time.sleep(0.5)  # Rate limiting
                 
@@ -416,7 +423,7 @@ class MathPipeline:
             if not os.path.exists(encyclopedia_path):
                 raise FileNotFoundError(
                     f"Encyclopedia file not found: {encyclopedia_path}\n"
-                    f"Please provide a valid encyclopedia file or run STEP 1 and STEP 2 first"
+                    "Please provide a valid encyclopedia file or run STEP 1 and STEP 2 first"
                 )
             if not dataset2_name:
                 raise ValueError("dataset2_name is required when starting from STEP 3")

@@ -296,28 +296,52 @@ Your task: Generate concrete, actionable skills in JSON format. Each skill shoul
 4. Each skill must be **reusable** - applicable to similar problems, not just this one
 5. Skills should be formatted like agent skills: clear instructions that guide step-by-step reasoning
 
-**Output Format:**
-Generate a JSON object where:
-- Keys are skill names (must start with `skill_`)
-- Values are skill descriptions that include:
-  * **When to use**: Under what conditions this skill applies
-  * **Step-by-step instructions**: Concrete, actionable steps
-  * **Key insights**: Why this approach works and what to watch for
-  * **Example application**: Brief note on how it was used in this problem
+**CRITICAL: Output Format Requirements**
+You MUST output a valid JSON object with the following EXACT structure:
+- The JSON object must have keys that are skill names (each must start with "skill_")
+- Each skill name maps to a STRING description (not a nested object, not an array)
+- The description string should contain all information in a single, well-formatted text
+- Use \\n for newlines within strings
+- Use numbered format "1) 2) 3)" for steps (no periods after numbers)
 
-Each skill description should be comprehensive but concise. Use newlines within the description for readability.
-
-Example format:
+**Required JSON Structure (each value is a single string):**
 {{
-  "skill_polynomialFactoring": "When to use: When solving equations with polynomial expressions that can be factored.\\n\\nStep-by-step: 1) Identify common factors or patterns (difference of squares, perfect square trinomials, etc.). 2) Apply appropriate factoring technique. 3) Set each factor equal to zero. 4) Solve resulting equations.\\n\\nKey insights: Factoring reduces complex polynomials to simpler linear/quadratic equations. Look for patterns like a²-b²=(a-b)(a+b) or x²+2ax+a²=(x+a)².\\n\\nExample: Used to factor x²-9=(x-3)(x+3) in quadratic equation solving.",
-  "skill_systematicSubstitution": "When to use: When dealing with systems of equations or complex expressions with multiple variables.\\n\\nStep-by-step: 1) Identify which variable to substitute. 2) Express one variable in terms of others from one equation. 3) Substitute into other equations. 4) Simplify and solve. 5) Back-substitute to find remaining variables.\\n\\nKey insights: Reduces multi-variable problems to single-variable problems. Choose substitutions that simplify the most.\\n\\nExample: Used to solve system by expressing y in terms of x, then substituting into second equation."
+  "skill_name1": "When to use: [description]\\n\\nStep-by-step: 1) [step1] 2) [step2] 3) [step3]\\n\\nKey insights: [insights]\\n\\nExample: [example]",
+  "skill_name2": "When to use: [description]\\n\\nStep-by-step: 1) [step1] 2) [step2]\\n\\nKey insights: [insights]\\n\\nExample: [example]"
 }}
 
-**Important:**
-- Only extract skills that are actually present in the solution
-- Each skill must have concrete, actionable steps
-- Include insights that explain the reasoning behind the approach
-- Output ONLY the JSON object, no additional commentary
+**DO NOT use nested objects or arrays. Each skill value MUST be a single string.**
+
+**Skill Content Requirements (all within one string per skill):**
+1. **When to use**: Under what conditions this skill applies (1-2 sentences)
+2. **Step-by-step**: Numbered list of concrete, actionable steps (format: "1) [step] 2) [step] 3) [step]")
+3. **Key insights**: Why this approach works and what to watch for (1-2 sentences)
+4. **Example**: Brief note on how it was used in this problem (1 sentence)
+
+**Example of Correct Format:**
+{{
+  "skill_polynomialFactoring": "When to use: When solving equations with polynomial expressions that can be factored.\\n\\nStep-by-step: 1) Identify common factors or patterns (difference of squares, perfect square trinomials, etc.) 2) Apply appropriate factoring technique 3) Set each factor equal to zero 4) Solve resulting equations\\n\\nKey insights: Factoring reduces complex polynomials to simpler linear/quadratic equations. Look for patterns like a²-b²=(a-b)(a+b).\\n\\nExample: Used to factor x²-9=(x-3)(x+3) in quadratic equation solving.",
+  "skill_systematicSubstitution": "When to use: When dealing with systems of equations or complex expressions with multiple variables.\\n\\nStep-by-step: 1) Identify which variable to substitute 2) Express one variable in terms of others from one equation 3) Substitute into other equations 4) Simplify and solve 5) Back-substitute to find remaining variables\\n\\nKey insights: Reduces multi-variable problems to single-variable problems. Choose substitutions that simplify the most.\\n\\nExample: Used to solve system by expressing y in terms of x, then substituting into second equation."
+}}
+
+**CRITICAL Rules - Follow Exactly:**
+1. Output ONLY valid JSON - no markdown code blocks (```json), no explanations, no extra text before or after
+2. Each skill name MUST start with "skill_"
+3. Each skill value MUST be a single string (NOT an object like {{"when_to_use": "...", "step_by_step": [...]}})
+4. Use \\n for newlines within strings
+5. Use numbered format "1) 2) 3)" for steps (no periods after numbers)
+6. Only extract skills that are actually present in the solution
+7. Each skill must have concrete, actionable steps
+8. Ensure all JSON keys and string values are properly quoted with double quotes
+9. Do not include trailing commas
+10. DO NOT use nested objects - if you see a structure like {{"when_to_use": "...", "step_by_step_instructions": [...]}}, convert it to a single string
+
+**CORRECT Format (USE THIS):**
+{{
+  "skill_name": "When to use: ...\\n\\nStep-by-step: 1) step1 2) step2\\n\\nKey insights: insight1 insight2\\n\\nExample: ..."
+}}
+
+**Output your response as a valid JSON object only (no markdown, no code blocks):**
                 """
         prompt = prompt_template.format(
             problem=problem, solution=solution, reflection=reflection
@@ -404,7 +428,18 @@ Example format:
                     # Clean up common JSON issues
                     json_str = re.sub(r',\s*}', '}', json_str)
                     json_str = re.sub(r',\s*]', ']', json_str)
-                    json_data = json.loads(json_str)
+                    # Try parsing first
+                    try:
+                        json_data = json.loads(json_str)
+                    except json.JSONDecodeError:
+                        # If parsing fails, try to fix more issues
+                        # Remove trailing commas more aggressively
+                        json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)
+                        # Fix single quotes to double quotes (but be careful with strings)
+                        json_str = re.sub(r"'([^']*)':", r'"\1":', json_str)  # Keys
+                        json_str = re.sub(r":\s*'([^']*)'", r': "\1"', json_str)  # String values
+                        # Try again
+                        json_data = json.loads(json_str)
                     
                     # Handle both dict and list formats
                     if isinstance(json_data, list):
@@ -416,10 +451,18 @@ Example format:
                                 
                                 # Handle nested skill structure in list format
                                 if isinstance(skill_desc, dict):
-                                    when_to_use = skill_desc.get("when_to_use", skill_desc.get("when to use", ""))
-                                    step_by_step = skill_desc.get("step_by_step_instructions", skill_desc.get("step-by-step", skill_desc.get("step_by_step", [])))
-                                    key_insights = skill_desc.get("key_insights", skill_desc.get("key insights", skill_desc.get("insights", [])))
-                                    example = skill_desc.get("example_application", skill_desc.get("example application", skill_desc.get("example", "")))
+                                    # Try multiple key name variations (with underscores, spaces, camelCase, etc.)
+                                    when_to_use = (skill_desc.get("when_to_use") or skill_desc.get("when to use") or 
+                                                 skill_desc.get("When to use") or skill_desc.get("whenToUse") or "")
+                                    step_by_step = (skill_desc.get("step_by_step_instructions") or skill_desc.get("step-by-step") or 
+                                                   skill_desc.get("step_by_step") or skill_desc.get("Step-by-step") or 
+                                                   skill_desc.get("Step-by-step Instructions") or skill_desc.get("instructions") or [])
+                                    key_insights = (skill_desc.get("key_insights") or skill_desc.get("key insights") or 
+                                                  skill_desc.get("Key Insights") or skill_desc.get("insights") or 
+                                                  skill_desc.get("Insights") or [])
+                                    example = (skill_desc.get("example_application") or skill_desc.get("example application") or 
+                                              skill_desc.get("Example Application") or skill_desc.get("example") or 
+                                              skill_desc.get("Example") or "")
                                     
                                     # Format step-by-step instructions
                                     if isinstance(step_by_step, list):
@@ -458,10 +501,18 @@ Example format:
                             # Handle nested skill structure (dict with when_to_use, step_by_step_instructions, etc.)
                             if isinstance(v, dict):
                                 # Convert nested dict to formatted string
-                                when_to_use = v.get("when_to_use", v.get("when to use", ""))
-                                step_by_step = v.get("step_by_step_instructions", v.get("step-by-step", v.get("step_by_step", [])))
-                                key_insights = v.get("key_insights", v.get("key insights", v.get("insights", [])))
-                                example = v.get("example_application", v.get("example application", v.get("example", "")))
+                                # Try multiple key name variations (with underscores, spaces, camelCase, etc.)
+                                when_to_use = (v.get("when_to_use") or v.get("when to use") or 
+                                             v.get("When to use") or v.get("whenToUse") or "")
+                                step_by_step = (v.get("step_by_step_instructions") or v.get("step-by-step") or 
+                                               v.get("step_by_step") or v.get("Step-by-step") or 
+                                               v.get("Step-by-step Instructions") or v.get("instructions") or [])
+                                key_insights = (v.get("key_insights") or v.get("key insights") or 
+                                              v.get("Key Insights") or v.get("insights") or 
+                                              v.get("Insights") or [])
+                                example = (v.get("example_application") or v.get("example application") or 
+                                          v.get("Example Application") or v.get("example") or 
+                                          v.get("Example") or "")
                                 
                                 # Format step-by-step instructions
                                 if isinstance(step_by_step, list):
@@ -564,10 +615,9 @@ Example format:
             if v and isinstance(v, str) and len(v.strip()) >= 20:
                 valid_skills[k] = v
         if not valid_skills:
-            print("WARNING: No valid skills extracted! Adding fallback skill.")
-            skills["skill_fallback"] = "When to use: For any problem-solving task.\\n\\nStep-by-step: 1) Carefully read and understand the problem. 2) Break down the problem into smaller sub-problems. 3) Apply relevant mathematical/analytical techniques systematically. 4) Verify each step for correctness. 5) Check the final answer.\\n\\nKey insights: Systematic approach reduces errors. Break complex problems into manageable parts.\\n\\nExample: Used as a general problem-solving framework."
-            valid_skills = {"skill_fallback": skills["skill_fallback"]}
-            formatted_json_array = [{"skill_name": "skill_fallback", "description": skills["skill_fallback"]}]
+            print("WARNING: No valid skills extracted from this problem!")
+            # Do not add fallback skill - just report the warning
+            # formatted_json_array will remain empty or as is
         
         # Report validation results
         if validation_errors:
@@ -646,7 +696,7 @@ Please answer the user's question based on the paper content provided above."""
         print("Step 3: Extracting actionable skills...")
         step3 = self._step_behavior_extraction(problem, solution, reflection)
         time.sleep(1)
-        
+
         # Update behavior_book with extracted skills
         extracted_skills = step3.get("valid_skills", step3.get("skills", {}))
         if extracted_skills:
