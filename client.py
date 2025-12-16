@@ -402,7 +402,7 @@ Simple JSON object: {{"skill_name": "description"}}
         prompt = self._get_behavior_prompt(problem, solution, reflection)
 
         system_prompt = None
-        response = self._call_model(prompt, system_prompt, max_new_tokens=97280)
+        response = self._call_model(prompt, system_prompt, max_new_tokens=32768)
         print(f"Skill Extraction Response: {response}") 
 
         # Parse skills from response with validation
