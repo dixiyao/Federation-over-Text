@@ -331,14 +331,13 @@ Simple JSON object: {{"skill_name": "description"}}
 1. Output ONLY valid JSON - no markdown code blocks, no comments, no extra text before or after
 2. Each skill name MUST start with "skill_"
 3. Each skill value MUST be a single string (NOT an object or array)
-4. Description must include all four sections: When to use, Step-by-step, Key insights, Example
-5. Use \\n\\n to separate sections within the description string
-6. Steps must be numbered: 1) 2) 3) (no periods after numbers)
-7. Only extract skills that are actually present and used in the solution
-8. Each skill must have concrete, actionable steps
-9. Ensure all JSON keys and string values are properly quoted with double quotes
-10. Do not include trailing commas
-11. DO NOT use nested objects - everything must be in a single string value
+4. Use \\n\\n to separate sections within the description string
+5. Steps must be numbered: 1) 2) 3) (no periods after numbers)
+6. Only extract skills that are actually present and used in the solution
+7. Each skill must have concrete, actionable steps
+8. Ensure all JSON keys and string values are properly quoted with double quotes
+9. Do not include trailing commas
+10. DO NOT use nested objects - everything must be in a single string value
 
 **Output your response as a valid JSON object only (no markdown, no code blocks):**
                 """
