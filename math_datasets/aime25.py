@@ -1,5 +1,6 @@
-
-aime25_prompt = "\nSolve the problem step by step. Wrap your final answer in \"\\boxed{}\"."
+aime25_prompt = (
+    '\nSolve the problem step by step. Wrap your final answer in "\\boxed{}".'
+)
 
 
 def aime25_formatter(example):
@@ -18,13 +19,13 @@ def accuracy(predictions, answers):
     """
     correct = 0
     total = len(predictions)
-    
+
     for prediction, answer in zip(predictions, answers):
         if prediction == answer:
             correct += 1
 
     return correct / total if total > 0 else 0.0
-    
+
 
 def aime25_scorer(predictions, answers):
     """

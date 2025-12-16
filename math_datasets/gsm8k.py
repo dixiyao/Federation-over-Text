@@ -1,5 +1,6 @@
-
-gsm8k_prompt = "\nSolve the problem step by step. Wrap your final answer in \"\\boxed{}\"."
+gsm8k_prompt = (
+    '\nSolve the problem step by step. Wrap your final answer in "\\boxed{}".'
+)
 
 
 def gsm8k_formatter(example):
@@ -25,7 +26,7 @@ def accuracy(predictions, answers):
             correct += 1
 
     return correct / total if total > 0 else 0.0
-    
+
 
 def gsm8k_scorer(predictions, answers):
     """

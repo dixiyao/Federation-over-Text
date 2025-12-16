@@ -40,33 +40,33 @@ class ChainOfThoughtReader:
             or "Analyze this paper and identify key contributions, limitations, and potential future research directions."
         )
         self.behavior_book = {}  # Store extracted behaviors
-        
+
         # Model and tokenizer will be loaded lazily on first use
         self.model = None
         self.tokenizer = None
         self.device = device or ("cuda" if self._check_cuda() else "cpu")
-        
+
     def _check_cuda(self) -> bool:
         """Check if CUDA is available"""
         try:
             return torch.cuda.is_available()
         except ImportError:
             return False
-    
+
     def _load_model(self):
         """Lazy load the Hugging Face model and tokenizer"""
         if self.model is not None and self.tokenizer is not None:
             return
-        
+
         try:
             print(f"Loading model: {self.model_name}")
             print(f"Device: {self.device}")
-            
+
             # Load tokenizer
             self.tokenizer = AutoTokenizer.from_pretrained(
                 self.model_name, trust_remote_code=True
             )
-            
+
             # Load model
             # Use torch_dtype instead of dtype for from_pretrained
             model_kwargs = {
@@ -82,16 +82,16 @@ class ChainOfThoughtReader:
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.model_name, **model_kwargs
             )
-            
+
             if self.device == "cpu":
                 self.model = self.model.to(self.device)
-            
+
             # Set pad token if not present
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
-            
+
             print("Model loaded successfully!")
-            
+
         except ImportError:
             raise ImportError(
                 "transformers and torch are required. Install with: pip install transformers torch"
@@ -138,31 +138,36 @@ class ChainOfThoughtReader:
 
         return pdf_files
 
-    def _call_model(self, prompt: str, system_prompt: Optional[str] = None, max_new_tokens: Optional[int] = None) -> str:
+    def _call_model(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        max_new_tokens: Optional[int] = None,
+    ) -> str:
         """
         Call the Hugging Face language model.
-        
+
         Args:
             prompt: The user prompt
             system_prompt: Optional system prompt (will be prepended if provided)
                           NOTE: For DeepSeek-R1 models, avoid system prompts - put all in user prompt
             max_new_tokens: Maximum number of new tokens to generate. If None, uses default 32768.
-        
+
         Returns:
             Generated text response
         """
         # Load model if not already loaded
         self._load_model()
-        
+
         # For DeepSeek-R1: Avoid system prompts, put all instructions in user prompt
         # If system_prompt is provided, combine it into the user prompt
         if system_prompt:
             full_prompt = f"{system_prompt}\n\n{prompt}"
         else:
             full_prompt = prompt
-        
+
         try:
-            
+
             # Tokenize input
             # For papers with ~80k characters, we need ~20-30k tokens
             # DeepSeek-R1 supports large context windows (64k+ tokens)
@@ -184,22 +189,22 @@ class ChainOfThoughtReader:
             print(
                 f"Input tokens: {input_token_count}, Max new tokens: {max_new_tokens}"
             )
-            
+
             # Generate response
             with torch.no_grad():
-                # DeepSeek-R1 recommendations: temperature 0.6, top_p 0.95, repetition_penalty 1.8
+                # Use standard settings for reliable generation
                 # Check if model name contains "DeepSeek-R1" to use recommended settings
                 is_deepseek_r1 = "DeepSeek-R1" in self.model_name
-                
+
                 if is_deepseek_r1:
-                    # DeepSeek-R1 recommended settings
+                    # DeepSeek-R1 settings - more conservative for reliable output
                     outputs = self.model.generate(
                         **inputs,
                         max_new_tokens=max_new_tokens,
                         do_sample=True,
-                        top_p=0.95,
-                        temperature=0.6,
-                        repetition_penalty=1.8,
+                        top_p=0.9,
+                        temperature=0.7,
+                        repetition_penalty=1.1,
                         use_cache=True,
                         pad_token_id=self.tokenizer.eos_token_id,
                     )
@@ -214,14 +219,14 @@ class ChainOfThoughtReader:
                         repetition_penalty=1.1,
                         pad_token_id=self.tokenizer.eos_token_id,
                     )
-            
+
             # Decode response
             generated_text = self.tokenizer.decode(
                 outputs[0][inputs["input_ids"].shape[1] :], skip_special_tokens=True
             )
-            
+
             return generated_text.strip()
-            
+
         except Exception as e:
             print(f"Error calling model: {e}")
             return f"[Error] Model generation failed: {str(e)}"
@@ -396,17 +401,17 @@ Simple JSON object: {{"skill_name": "description"}}
 
         system_prompt = None
         response = self._call_model(prompt, system_prompt, max_new_tokens=32768)
-        print(f"Skill Extraction Response: {response}") 
+        print(f"Skill Extraction Response: {response}")
 
         # Parse skills from response - simple extraction: just name and description
         # Replace \n\n with ; in descriptions for easier parsing
         skills = {}
         validation_errors = []
-        
+
         try:
             # Extract JSON object from response
             json_str = None
-            
+
             # Try to extract JSON from markdown code blocks
             json_code_block = re.search(
                 r"```(?:json)?\s*(\{.*?\})\s*```", response, re.DOTALL
@@ -416,7 +421,7 @@ Simple JSON object: {{"skill_name": "description"}}
             else:
                 # Find JSON object using brace counting
                 brace_count = 0
-                start_idx = response.find('{')
+                start_idx = response.find("{")
                 if start_idx != -1:
                     in_string = False
                     escape_next = False
@@ -425,60 +430,60 @@ Simple JSON object: {{"skill_name": "description"}}
                         if escape_next:
                             escape_next = False
                             continue
-                        if char == '\\':
+                        if char == "\\":
                             escape_next = True
                             continue
                         if char == '"' and not escape_next:
                             in_string = not in_string
                             continue
                         if not in_string:
-                            if char == '{':
+                            if char == "{":
                                 brace_count += 1
-                            elif char == '}':
+                            elif char == "}":
                                 brace_count -= 1
                                 if brace_count == 0:
-                                    json_str = response[start_idx:i+1]
+                                    json_str = response[start_idx : i + 1]
                                     break
                     else:
                         # If incomplete, try to find last complete brace
-                        last_brace = response.rfind('}', start_idx)
+                        last_brace = response.rfind("}", start_idx)
                         if last_brace != -1:
-                            json_str = response[start_idx:last_brace+1]
+                            json_str = response[start_idx : last_brace + 1]
 
             if json_str:
                 try:
                     # Clean up JSON: remove comments and trailing commas
-                    json_str = re.sub(r'^\s*//.*?$', '', json_str, flags=re.MULTILINE)
-                    json_str = re.sub(r'//.*?(?=\n|$)', '', json_str)
-                    json_str = re.sub(r'/\*.*?\*/', '', json_str, flags=re.DOTALL)
-                    json_str = re.sub(r',\s*}', '}', json_str)
-                    json_str = re.sub(r',\s*]', ']', json_str)
-                    
+                    json_str = re.sub(r"^\s*//.*?$", "", json_str, flags=re.MULTILINE)
+                    json_str = re.sub(r"//.*?(?=\n|$)", "", json_str)
+                    json_str = re.sub(r"/\*.*?\*/", "", json_str, flags=re.DOTALL)
+                    json_str = re.sub(r",\s*}", "}", json_str)
+                    json_str = re.sub(r",\s*]", "]", json_str)
+
                     # Remove trailing text after last brace
-                    last_brace = json_str.rfind('}')
+                    last_brace = json_str.rfind("}")
                     if last_brace != -1:
-                        text_after = json_str[last_brace+1:].strip()
-                        if text_after and not text_after.startswith('}'):
-                            json_str = json_str[:last_brace+1]
-                    
+                        text_after = json_str[last_brace + 1 :].strip()
+                        if text_after and not text_after.startswith("}"):
+                            json_str = json_str[: last_brace + 1]
+
                     # Try parsing
                     try:
                         json_data = json.loads(json_str)
                     except json.JSONDecodeError as e:
                         # Fix trailing commas more aggressively
                         for _ in range(5):
-                            json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)
+                            json_str = re.sub(r",(\s*[}\]])", r"\1", json_str)
                         json_str = re.sub(r"'([^']*)':", r'"\1":', json_str)
                         json_str = re.sub(r":\s*'([^']*)'", r': "\1"', json_str)
                         json_data = json.loads(json_str)
-                    
+
                     # Extract skills: simple key-value pairs
                     if isinstance(json_data, dict):
                         for skill_name, skill_desc in json_data.items():
                             # Ensure skill name starts with skill_
                             if not skill_name.startswith("skill_"):
                                 skill_name = f"skill_{skill_name}"
-                            
+
                             # Convert description to string
                             if isinstance(skill_desc, dict):
                                 skill_desc = str(skill_desc)
@@ -486,17 +491,24 @@ Simple JSON object: {{"skill_name": "description"}}
                                 skill_desc = " ".join(str(item) for item in skill_desc)
                             elif not isinstance(skill_desc, str):
                                 skill_desc = str(skill_desc)
-                            
+
                             # Replace \n\n with ; and normalize whitespace
-                            skill_desc = skill_desc.replace('\\n\\n', '; ').replace('\\n', ' ').replace('\n\n', '; ').replace('\n', ' ')
-                            skill_desc = re.sub(r'\s+', ' ', skill_desc).strip()
-                            
+                            skill_desc = (
+                                skill_desc.replace("\\n\\n", "; ")
+                                .replace("\\n", " ")
+                                .replace("\n\n", "; ")
+                                .replace("\n", " ")
+                            )
+                            skill_desc = re.sub(r"\s+", " ", skill_desc).strip()
+
                             # Validate: must have minimum length
                             if len(skill_desc) >= 20:
                                 skills[skill_name] = skill_desc
                             else:
-                                validation_errors.append(f"Skill '{skill_name}' has too short description")
-                    
+                                validation_errors.append(
+                                    f"Skill '{skill_name}' has too short description"
+                                )
+
                 except json.JSONDecodeError as e:
                     print(f"Warning: JSON decode error: {e}")
                     validation_errors.append(f"JSON parsing error: {e}")
@@ -509,24 +521,28 @@ Simple JSON object: {{"skill_name": "description"}}
                 name_pattern = r'"skill_\w+"'
                 names = re.findall(name_pattern, response)
                 descriptions = re.findall(skill_pattern, response)
-                
+
                 for i, name in enumerate(names):
                     if i < len(descriptions):
                         skill_name = name.strip('"')
-                        skill_desc = descriptions[i].replace('\\n', ' ').replace('\\"', '"')
+                        skill_desc = (
+                            descriptions[i].replace("\\n", " ").replace('\\"', '"')
+                        )
                         # Replace \n\n with ;
-                        skill_desc = skill_desc.replace('\n\n', '; ').replace('\n', ' ')
-                        skill_desc = re.sub(r'\s+', ' ', skill_desc).strip()
+                        skill_desc = skill_desc.replace("\n\n", "; ").replace("\n", " ")
+                        skill_desc = re.sub(r"\s+", " ", skill_desc).strip()
                         if len(skill_desc) >= 20:
                             skills[skill_name] = skill_desc
-                
+
                 if not skills:
-                    validation_errors.append("Could not extract any skills from response")
-                    
+                    validation_errors.append(
+                        "Could not extract any skills from response"
+                    )
+
         except Exception as e:
             print(f"Warning: Error parsing skills: {e}")
             validation_errors.append(f"Exception during parsing: {e}")
-        
+
         # Filter valid skills
         valid_skills = {}
         for k, v in skills.items():
@@ -538,14 +554,16 @@ Simple JSON object: {{"skill_name": "description"}}
             print("WARNING: No valid skills extracted from this problem!")
             # Do not add fallback skill - just report the warning
             # formatted_json_array will remain empty or as is
-        
+
         # Report validation results
         if validation_errors:
             print(f"Validation warnings ({len(validation_errors)}):")
             for error in validation_errors[:5]:  # Show first 5 errors
                 print(f"  - {error}")
-        
-        print(f"Extracted {len(valid_skills)} valid skills: {list(valid_skills.keys())}")
+
+        print(
+            f"Extracted {len(valid_skills)} valid skills: {list(valid_skills.keys())}"
+        )
 
         # Create formatted JSON array for backward compatibility
         formatted_json_array = [
@@ -638,7 +656,9 @@ Please answer the user's question based on the paper content provided above."""
             "solution": solution,
             "reflection": reflection,
             "skills_extracted": step3.get("valid_skills", step3.get("skills", {})),
-            "skills_used": list(step3.get("valid_skills", step3.get("skills", {})).keys()),
+            "skills_used": list(
+                step3.get("valid_skills", step3.get("skills", {})).keys()
+            ),
             "validation_errors": step3.get("validation_errors", []),
             "behavior_book": self.behavior_book,
             "total_steps": len(self.reasoning_steps),
@@ -883,7 +903,7 @@ if __name__ == "__main__":
 
     # Example usage
     reader = ChainOfThoughtReader(
-        model_name=args.model, 
+        model_name=args.model,
         task=args.task,
         device=args.device,
         papers_dir=args.papers_dir,
@@ -908,8 +928,10 @@ if __name__ == "__main__":
                 print(f"Solution: {result.get('solution', 'N/A')[:200]}...")
                 print(f"\nSkills Extracted: {len(result.get('skills_extracted', {}))}")
                 print(f"Skills Used: {result.get('skills_used', [])}")
-                if result.get('validation_errors'):
-                    print(f"Validation Warnings: {len(result.get('validation_errors', []))}")
+                if result.get("validation_errors"):
+                    print(
+                        f"Validation Warnings: {len(result.get('validation_errors', []))}"
+                    )
                 print("\n" + "=" * 80)
                 print("EXTRACTED SKILLS")
                 print("=" * 80)
@@ -920,26 +942,28 @@ if __name__ == "__main__":
             # Process multiple papers
             papers_dir = args.papers_dir or reader.papers_dir
             if not papers_dir:
-                print("Error: Please provide a papers directory using -p or --papers-dir")
-                print("Example: python client.py -t 'Question' -p data/papers/iclr23_top5 -n 10")
+                print(
+                    "Error: Please provide a papers directory using -p or --papers-dir"
+                )
+                print(
+                    "Example: python client.py -t 'Question' -p data/papers/iclr23_top5 -n 10"
+                )
                 exit(1)
-            
+
             print(f"Processing papers from: {papers_dir}")
             print(f"Number of papers: {args.num_papers or 'all'}")
             print("=" * 80)
-            
+
             results = reader.process_multiple_papers(
-                question=args.task,
-                papers_dir=papers_dir,
-                num_papers=args.num_papers
+                question=args.task, papers_dir=papers_dir, num_papers=args.num_papers
             )
-            
+
             if results:
                 print("\n" + "=" * 80)
                 print("ALL PAPERS PROCESSED")
                 print("=" * 80)
                 print(f"Total papers processed: {len(results)}")
-                total_skills = sum(len(r.get('behavior_book', {})) for r in results)
+                total_skills = sum(len(r.get("behavior_book", {})) for r in results)
                 print(f"Total skills extracted: {total_skills}")
                 print("=" * 80)
             else:

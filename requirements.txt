@@ -5,4 +5,5 @@ lxml>=4.9.0
 transformers>=4.35.0
 torch>=2.0.0
 accelerate>=0.24.0
-
+black>=25.0.0
+isort>=5.12.0

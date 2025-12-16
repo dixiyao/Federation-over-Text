@@ -51,7 +51,7 @@ class MathPipeline:
         self.device = device
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
-        
+
         # Initialize components
         self.client = None
         self.server = None
@@ -61,10 +61,10 @@ class MathPipeline:
         """
         Load math dataset from Hugging Face using the datasets library.
         Same approach as kvpress: https://github.com/minghui-liu/kvpress/blob/decode/reason/evaluate.py
-        
+
         Args:
             dataset_name: Dataset name (e.g., "aime25", "gsm8k", "math500")
-        
+
         Returns:
             List of problem dictionaries
         """
@@ -72,26 +72,26 @@ class MathPipeline:
             raise ImportError(
                 "datasets library is required. Install with: pip install datasets"
             )
-        
+
         if dataset_name not in DATASET_DICT:
             raise ValueError(
                 f"Unknown dataset: {dataset_name}. "
                 f"Available datasets: {', '.join(DATASET_DICT.keys())}"
             )
-        
+
         # Load from Hugging Face (exactly like kvpress does)
         print(f"Loading dataset '{dataset_name}' from Hugging Face...")
         dataset_info = DATASET_DICT[dataset_name]
         hf_name = dataset_info[0]
         data_dir = dataset_info[1]
         data_split = dataset_info[2]
-        
+
         # Load dataset exactly like kvpress: load_dataset(hf_name, data_dir=data_dir, split=data_split)
         if data_dir:
             ds = load_dataset(hf_name, data_dir=data_dir, split=data_split)
         else:
             ds = load_dataset(hf_name, split=data_split)
-        
+
         # Handle special case for math1000 (take first 1000 from competition_math)
         if dataset_name == "math1000":
             problems = []
@@ -105,13 +105,15 @@ class MathPipeline:
                     answer = solution.split("####")[-1].strip()
                 else:
                     answer = solution.strip().split("\n")[-1] if solution else ""
-                
-                problems.append({
-                    "id": i + 1,
-                    "question": item.get("problem", ""),
-                    "answer": answer,
-                    "solution": solution,
-                })
+
+                problems.append(
+                    {
+                        "id": i + 1,
+                        "question": item.get("problem", ""),
+                        "answer": answer,
+                        "solution": solution,
+                    }
+                )
             print(f"Loaded {len(problems)} problems from Hugging Face")
         else:
             # Convert dataset to list of problems (iterate like kvpress: for i, example in enumerate(ds))
@@ -133,15 +135,19 @@ class MathPipeline:
                         problem["answer"] = parts[-1].strip()
                 problems.append(problem)
             print(f"Loaded {len(problems)} problems from Hugging Face")
-        
+
         # Normalize problem format to have consistent keys
         normalized = []
         for idx, problem in enumerate(problems):
             # Handle different field names
             normalized_problem = {
                 "id": problem.get("id", problem.get("problem_id", idx + 1)),
-                "problem": problem.get("problem", problem.get("question", problem.get("text", ""))),
-                "question": problem.get("question", problem.get("problem", problem.get("text", ""))),
+                "problem": problem.get(
+                    "problem", problem.get("question", problem.get("text", ""))
+                ),
+                "question": problem.get(
+                    "question", problem.get("problem", problem.get("text", ""))
+                ),
                 "solution": problem.get("solution", problem.get("step_by_step", "")),
                 "answer": problem.get("answer", problem.get("final_answer", "")),
             }
@@ -149,9 +155,9 @@ class MathPipeline:
             for key, value in problem.items():
                 if key not in normalized_problem:
                     normalized_problem[key] = value
-            
+
             normalized.append(normalized_problem)
-        
+
         return normalized
 
     def learn_skills_from_dataset1(
@@ -161,53 +167,61 @@ class MathPipeline:
         Step 1: Use client.py to learn skills from dataset1 (e.g., aime25).
         Each question uses a client to extract skills.
         Skills are saved directly to output_dir as problem_*.json files.
-        
+
         Returns:
             Path to output directory containing skill JSON files
         """
         print("\n" + "=" * 80)
         print("STEP 1: Learning Skills from Dataset1")
         print("=" * 80)
-        
+
         # Load dataset1 from Hugging Face
         problems = self.load_math_dataset(dataset1_name)
         if max_problems:
             problems = problems[:max_problems]
-        
+
         print(f"Loaded {len(problems)} problems from dataset '{dataset1_name}'")
-        
+
         # Create client instance
         self.client = ChainOfThoughtReader(
             model_name=self.model_name,
             device=self.device,
         )
-        
+
         # Ensure output directory exists (skills will be saved directly here)
         os.makedirs(self.output_dir, exist_ok=True)
-        
+
         # Process each problem to extract skills
         print(f"\nProcessing {len(problems)} problems to extract skills...")
         for idx, problem_data in enumerate(problems, 1):
             # Try both 'problem' and 'question' fields (normalized in load_math_dataset)
-            problem_text = problem_data.get("problem") or problem_data.get("question", "")
+            problem_text = problem_data.get("problem") or problem_data.get(
+                "question", ""
+            )
             if not problem_text:
-                print(f"Warning: Problem {idx} has no problem/question field. Skipping...")
+                print(
+                    f"Warning: Problem {idx} has no problem/question field. Skipping..."
+                )
                 continue
-            
+
             print(f"\n[{idx}/{len(problems)}] Processing problem...")
             print(f"Problem: {problem_text}")
-            
+
             try:
                 # Use client to extract skills from this problem
                 # The task/question is the problem itself
                 result = self.client.read_paper(task=problem_text, paper_content=None)
-                
+
                 # Save skill book for this problem
                 skill_book = result.get("behavior_book", {})
                 if skill_book:
                     # Filter out any fallback skills that might have been added
-                    skill_book = {k: v for k, v in skill_book.items() if not k.startswith("skill_fallback")}
-                    
+                    skill_book = {
+                        k: v
+                        for k, v in skill_book.items()
+                        if not k.startswith("skill_fallback")
+                    }
+
                     if skill_book:  # Only save if there are valid skills
                         output_data = {
                             "problem": problem_text,
@@ -217,45 +231,50 @@ class MathPipeline:
                     else:
                         print("  No valid skills extracted (only fallback found)")
                         continue
-                    
+
                     # Save directly to output_dir (not in a subdirectory)
-                    output_path = os.path.join(self.output_dir, f"problem_{idx:04d}.json")
+                    output_path = os.path.join(
+                        self.output_dir, f"problem_{idx:04d}.json"
+                    )
                     with open(output_path, "w", encoding="utf-8") as f:
                         json.dump(output_data, f, indent=2, ensure_ascii=False)
-                    
+
                     print(f"  Extracted {len(skill_book)} skills -> {output_path}")
                 else:
                     print("  No skills extracted from this problem")
-                
+
                 time.sleep(0.5)  # Rate limiting
-                
+
             except Exception as e:
                 print(f"  Error processing problem {idx}: {e}")
                 import traceback
+
                 traceback.print_exc()
                 continue
-        
+
         print(f"\nCompleted skill extraction. Skills saved to: {self.output_dir}")
         return self.output_dir
 
-    def aggregate_skills(self, skills_dir: str, r1: float = 0.9, r2: float = 0.4) -> str:
+    def aggregate_skills(
+        self, skills_dir: str, r1: float = 0.9, r2: float = 0.4
+    ) -> str:
         """
         Step 2: Use server.py to aggregate skills from all problems.
-        
+
         Returns:
             Path to encyclopedia file
         """
         print("\n" + "=" * 80)
         print("STEP 2: Aggregating Skills")
         print("=" * 80)
-        
+
         # Create server instance
         self.server = SkillAggregationServer(
             model_name=self.model_name,
             device=self.device,
             input_dir=skills_dir,
         )
-        
+
         # Aggregate skills
         result = self.server.aggregate_and_build_encyclopedia(
             json_files=None,  # Use all JSON files in skills_dir
@@ -263,13 +282,13 @@ class MathPipeline:
             r2=r2,
             output_dir=self.output_dir,
         )
-        
+
         # Save the encyclopedia to disk
         self.server.save_results(result, output_dir=self.output_dir)
-        
+
         # Encyclopedia path
         encyclopedia_path = os.path.join(self.output_dir, "encyclopedia.txt")
-        
+
         print(f"\nSkills aggregated. Encyclopedia saved to: {encyclopedia_path}")
         return encyclopedia_path
 
@@ -282,55 +301,59 @@ class MathPipeline:
         """
         Step 3: Use generate_server.py to solve problems in dataset2 (e.g., math500).
         Uses the learned encyclopedia with minimal tokens.
-        
+
         Returns:
             List of results with predictions
         """
         print("\n" + "=" * 80)
         print("STEP 3: Solving Dataset2 with Learned Skills")
         print("=" * 80)
-        
+
         # Load dataset2 from Hugging Face
         problems = self.load_math_dataset(dataset2_name)
         if max_problems:
             problems = problems[:max_problems]
-        
+
         print(f"Loaded {len(problems)} problems from dataset '{dataset2_name}'")
-        
+
         # Create generate server instance
         self.generate_server = GenerateServer(
             model_name=self.model_name,
             device=self.device,
         )
-        
+
         # Load encyclopedia (this will automatically load GraphRAG database if available)
         self.generate_server.load_encyclopedia(encyclopedia_path)
-        
+
         # Note: GraphRAG is automatically used by generate_server.py
         # The _get_generation_prompt method in generate_server.py will:
         # 1. Use GraphRAG to retrieve relevant skills based on the query
         # 2. Format them appropriately
         # 3. Include them in the prompt
         # No need to override it - GraphRAG handles skill retrieval automatically
-        
+
         # Solve each problem
         results = []
         print(f"\nSolving {len(problems)} problems...")
-        
+
         for idx, problem_data in enumerate(problems, 1):
             # Try both 'problem' and 'question' fields (normalized in load_math_dataset)
-            problem_text = problem_data.get("problem") or problem_data.get("question", "")
+            problem_text = problem_data.get("problem") or problem_data.get(
+                "question", ""
+            )
             if not problem_text:
-                print(f"Warning: Problem {idx} has no problem/question field. Skipping...")
+                print(
+                    f"Warning: Problem {idx} has no problem/question field. Skipping..."
+                )
                 continue
-            
+
             print(f"\n[{idx}/{len(problems)}] Solving problem...")
             print(f"Problem: {problem_text}")
-            
+
             try:
                 # Generate answer using encyclopedia (is_math=True for math problems)
                 answer = self.generate_server.generate(problem_text, is_math=True)
-                
+
                 # Extract answer from response
                 answer_text = answer
                 if "## Answer:" in answer:
@@ -339,39 +362,43 @@ class MathPipeline:
                     if end_idx == -1:
                         end_idx = len(answer)
                     answer_text = answer[start_idx:end_idx].strip()
-                
+
                 result = {
                     "problem_id": problem_data.get("id", idx),
                     "problem": problem_text,
                     "question": problem_text,  # Keep both for compatibility
                     "predicted_answer": answer_text,
                     "full_response": answer,
-                    "ground_truth": problem_data.get("answer") or problem_data.get("solution", ""),
+                    "ground_truth": problem_data.get("answer")
+                    or problem_data.get("solution", ""),
                     "ground_truth_solution": problem_data.get("solution", ""),
                 }
-                
+
                 results.append(result)
                 print(f"  Generated answer: {answer_text}")
-                
+
                 time.sleep(0.5)  # Rate limiting
-                
+
             except Exception as e:
                 print(f"  Error solving problem {idx}: {e}")
                 import traceback
+
                 traceback.print_exc()
-                results.append({
-                    "problem_id": problem_data.get("id", idx),
-                    "problem": problem_text,
-                    "predicted_answer": "",
-                    "error": str(e),
-                })
+                results.append(
+                    {
+                        "problem_id": problem_data.get("id", idx),
+                        "problem": problem_text,
+                        "predicted_answer": "",
+                        "error": str(e),
+                    }
+                )
                 continue
-        
+
         # Save results
         results_path = os.path.join(self.output_dir, "dataset2_results.json")
         with open(results_path, "w", encoding="utf-8") as f:
             json.dump(results, f, indent=2, ensure_ascii=False)
-        
+
         print(f"\nResults saved to: {results_path}")
         return results
 
@@ -393,7 +420,7 @@ class MathPipeline:
         1. Learn skills from dataset1 (skipped if skills_dir is provided or start_from_step2 is True)
         2. Aggregate skills
         3. Solve dataset2 using learned skills (skipped if dataset2_name is None)
-        
+
         Args:
             dataset1_name: Dataset name for learning skills (required if skills_dir not provided)
             dataset2_name: Dataset name for testing (optional, if None, skip step 3)
@@ -403,12 +430,12 @@ class MathPipeline:
             r2: Threshold for linked skills
             skills_dir: Existing skills directory (if provided, skip step 1)
             start_from_step2: If True, use default output_dir (math_output) and skip step 1
-        
+
         Returns:
             Dictionary with results and statistics
         """
         start_time = time.time()
-        
+
         # Check if starting from STEP 3 (solving with existing encyclopedia)
         if start_from_step3 or encyclopedia_path:
             if not encyclopedia_path:
@@ -421,9 +448,13 @@ class MathPipeline:
                 )
             if not dataset2_name:
                 raise ValueError("dataset2_name is required when starting from STEP 3")
-            print(f"\nSkipping STEP 1 and STEP 2. Using existing encyclopedia from: {encyclopedia_path}")
+            print(
+                f"\nSkipping STEP 1 and STEP 2. Using existing encyclopedia from: {encyclopedia_path}"
+            )
             # Skip directly to STEP 3
-            results = self.solve_dataset2(dataset2_name, encyclopedia_path, max_problems=max_dataset2)
+            results = self.solve_dataset2(
+                dataset2_name, encyclopedia_path, max_problems=max_dataset2
+            )
         else:
             # Step 1: Learn skills from dataset1 (or use existing)
             if start_from_step2:
@@ -435,7 +466,11 @@ class MathPipeline:
                         "Please run STEP 1 first or provide a valid --skills-dir"
                     )
                 # Check if there are any skill JSON files
-                json_files = [f for f in os.listdir(skills_dir) if f.endswith('.json') and f.startswith('problem_')]
+                json_files = [
+                    f
+                    for f in os.listdir(skills_dir)
+                    if f.endswith(".json") and f.startswith("problem_")
+                ]
                 if not json_files:
                     raise FileNotFoundError(
                         f"No skill files found in: {skills_dir}\n"
@@ -450,25 +485,33 @@ class MathPipeline:
             else:
                 # Run STEP 1: Learn skills from dataset1
                 if not dataset1_name:
-                    raise ValueError("dataset1_name is required if skills_dir is not provided")
-                skills_dir = self.learn_skills_from_dataset1(dataset1_name, max_problems=max_dataset1)
-            
+                    raise ValueError(
+                        "dataset1_name is required if skills_dir is not provided"
+                    )
+                skills_dir = self.learn_skills_from_dataset1(
+                    dataset1_name, max_problems=max_dataset1
+                )
+
             # Step 2: Aggregate skills
             encyclopedia_path = self.aggregate_skills(skills_dir, r1=r1, r2=r2)
-            
+
             # Step 3: Solve dataset2 (optional)
             results = []
             if dataset2_name:
-                results = self.solve_dataset2(dataset2_name, encyclopedia_path, max_problems=max_dataset2)
-        
+                results = self.solve_dataset2(
+                    dataset2_name, encyclopedia_path, max_problems=max_dataset2
+                )
+
         # Calculate statistics
         total_time = time.time() - start_time
         num_correct = sum(
-            1 for r in results
-            if r.get("predicted_answer") and r.get("ground_truth")
+            1
+            for r in results
+            if r.get("predicted_answer")
+            and r.get("ground_truth")
             and self._check_answer_match(r["predicted_answer"], r["ground_truth"])
         )
-        
+
         summary = {
             "dataset1_name": dataset1_name,
             "dataset2_name": dataset2_name,
@@ -480,12 +523,12 @@ class MathPipeline:
             "encyclopedia_path": encyclopedia_path,
             "results_path": os.path.join(self.output_dir, "dataset2_results.json"),
         }
-        
+
         # Save summary
         summary_path = os.path.join(self.output_dir, "summary.json")
         with open(summary_path, "w", encoding="utf-8") as f:
             json.dump(summary, f, indent=2, ensure_ascii=False)
-        
+
         print("\n" + "=" * 80)
         print("PIPELINE COMPLETE")
         print("=" * 80)
@@ -496,7 +539,7 @@ class MathPipeline:
         print(f"Total time: {total_time:.2f} seconds")
         print(f"Summary saved to: {summary_path}")
         print("=" * 80)
-        
+
         return summary
 
     def _check_answer_match(self, predicted: str, ground_truth: str) -> bool:
@@ -504,25 +547,26 @@ class MathPipeline:
         Check if predicted answer matches ground truth.
         For math problems, extract final numerical answer and compare.
         """
+
         # Extract numbers from both answers
         def extract_numbers(text: str) -> List[float]:
             # Find all numbers (including decimals and negatives)
-            numbers = re.findall(r'-?\d+\.?\d*', text)
+            numbers = re.findall(r"-?\d+\.?\d*", text)
             return [float(n) for n in numbers if n]
-        
+
         pred_nums = extract_numbers(predicted)
         gt_nums = extract_numbers(ground_truth)
-        
+
         if not pred_nums or not gt_nums:
             # Fallback to string comparison
             return predicted.strip().lower() == ground_truth.strip().lower()
-        
+
         # Check if any predicted number matches any ground truth number
         for p in pred_nums:
             for g in gt_nums:
                 if abs(p - g) < 1e-6:  # Allow for floating point errors
                     return True
-        
+
         return False
 
 
@@ -535,14 +579,14 @@ if __name__ == "__main__":
         type=str,
         default="aime25",
         help="Dataset name for learning skills (e.g., aime25, gsm8k). "
-             "Will load from Hugging Face if available, otherwise from math_datasets/{name}.json (default: aime25)",
+        "Will load from Hugging Face if available, otherwise from math_datasets/{name}.json (default: aime25)",
     )
     parser.add_argument(
         "--dataset2",
         type=str,
         default="math500",
         help="Dataset name for testing (e.g., math500, gsm8k). "
-             "Will load from Hugging Face if available, otherwise from math_datasets/{name}.json (default: math500)",
+        "Will load from Hugging Face if available, otherwise from math_datasets/{name}.json (default: math500)",
     )
     parser.add_argument(
         "--max-dataset1",
@@ -629,7 +673,14 @@ if __name__ == "__main__":
     try:
         # Run full pipeline
         summary = pipeline.run_full_pipeline(
-            dataset1_name=dataset1_name if not args.start_from_step2 and not args.skills_dir and not args.start_from_step3 and not args.encyclopedia else None,
+            dataset1_name=(
+                dataset1_name
+                if not args.start_from_step2
+                and not args.skills_dir
+                and not args.start_from_step3
+                and not args.encyclopedia
+                else None
+            ),
             dataset2_name=dataset2_name,
             max_dataset1=args.max_dataset1,
             max_dataset2=args.max_dataset2,
@@ -644,6 +695,7 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Error: {e}")
         import traceback
+
         traceback.print_exc()
         print("\nMake sure you have:")
         print("1. Installed required packages: pip install -r requirements.txt")
@@ -659,9 +711,12 @@ if __name__ == "__main__":
         print("  # Start from STEP 2 using existing skills")
         print("  python math_pipeline.py --start-from-step2 --dataset2 math500")
         print("  # Or specify custom skills directory")
-        print("  python math_pipeline.py --skills-dir math_output/skills --dataset2 math500")
+        print(
+            "  python math_pipeline.py --skills-dir math_output/skills --dataset2 math500"
+        )
         print("  # Start from STEP 3 using existing encyclopedia")
         print("  python math_pipeline.py --start-from-step3 --dataset2 math500")
         print("  # Or specify custom encyclopedia file")
-        print("  python math_pipeline.py --encyclopedia math_output/encyclopedia.txt --dataset2 math500")
-
+        print(
+            "  python math_pipeline.py --encyclopedia math_output/encyclopedia.txt --dataset2 math500"
+        )

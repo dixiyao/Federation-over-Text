@@ -26,6 +26,7 @@ warnings.filterwarnings("ignore", message=".*Materializing param.*")
 
 try:
     import networkx as nx
+
     HAS_NETWORKX = True
 except ImportError:
     HAS_NETWORKX = False
@@ -56,7 +57,7 @@ class SkillAggregationServer:
         self.model = None
         self.tokenizer = None
         self.device = device or ("cuda" if self._check_cuda() else "cpu")
-        
+
         # Embedding model for knowledge graph (loaded lazily)
         self.embedding_model = None
         self.embedding_model_name = "BAAI/bge-base-en-v1.5"
@@ -155,19 +156,19 @@ class SkillAggregationServer:
             )
 
             with torch.no_grad():
-                # DeepSeek-R1 recommendations: temperature 0.5-0.7 (0.6 recommended)
+                # Use standard settings for reliable generation
                 # Check if model name contains "DeepSeek-R1" to use recommended settings
                 is_deepseek_r1 = "DeepSeek-R1" in self.model_name
-                
+
                 if is_deepseek_r1:
-                    # DeepSeek-R1 recommended settings
+                    # Standard settings for reliable output
                     outputs = self.model.generate(
                         **inputs,
                         max_new_tokens=max_new_tokens,
-                        temperature=0.7,  # Recommended for DeepSeek-R1
+                        temperature=0.7,  # Standard setting for reliable output
                         do_sample=True,
-                        top_p=0.9,  # Recommended for DeepSeek-R1
-                        repetition_penalty=1.2,
+                        top_p=0.9,  # Standard setting for reliable output
+                        repetition_penalty=1.1,
                         pad_token_id=self.tokenizer.eos_token_id,
                     )
                 else:
@@ -178,7 +179,7 @@ class SkillAggregationServer:
                         temperature=0.7,
                         do_sample=True,
                         top_p=0.9,
-                        repetition_penalty=1.2,
+                        repetition_penalty=1.1,
                         pad_token_id=self.tokenizer.eos_token_id,
                     )
 
@@ -210,8 +211,9 @@ class SkillAggregationServer:
             # Filter out non-skill files (metadata, summary, results, etc.)
             # Only process problem_*.json files (from math_pipeline) or other skill files
             json_files = [
-                str(f) for f in json_files 
-                if "metadata" not in f.name.lower() 
+                str(f)
+                for f in json_files
+                if "metadata" not in f.name.lower()
                 and "summary" not in f.name.lower()
                 and "results" not in f.name.lower()
                 and "encyclopedia" not in f.name.lower()
@@ -233,8 +235,12 @@ class SkillAggregationServer:
 
                 # Extract skill book (client.py uses "behavior_book" key but contains skills)
                 # Handle both dict and list formats
-                skill_book_raw = data.get("behavior_book") or data.get("behaviors") or data.get("skills")
-                
+                skill_book_raw = (
+                    data.get("behavior_book")
+                    or data.get("behaviors")
+                    or data.get("skills")
+                )
+
                 # Convert list format to dict if needed
                 skill_book = {}
                 if isinstance(skill_book_raw, dict):
@@ -245,14 +251,18 @@ class SkillAggregationServer:
                     for item in skill_book_raw:
                         if isinstance(item, dict):
                             # Try different key names
-                            skill_name = item.get("behavior") or item.get("skill") or item.get("name")
+                            skill_name = (
+                                item.get("behavior")
+                                or item.get("skill")
+                                or item.get("name")
+                            )
                             skill_desc = item.get("description") or item.get("desc")
                             if skill_name and skill_desc:
                                 # Ensure skill name starts with "skill_" prefix
                                 if not skill_name.startswith("skill_"):
                                     skill_name = f"skill_{skill_name}"
                                 skill_book[skill_name] = skill_desc
-                
+
                 if skill_book:
                     filename = Path(json_file).stem
                     collected_books[filename] = {
@@ -262,7 +272,7 @@ class SkillAggregationServer:
                         "solution": data.get("solution", ""),
                         "reflection": data.get("reflection", ""),
                     }
-                    
+
                     # Count and aggregate all skills
                     total_skills_count += len(skill_book)
                     for skill_name, skill_desc in skill_book.items():
@@ -270,9 +280,9 @@ class SkillAggregationServer:
                         all_skills[skill_name] = skill_desc
                         # Count occurrences
                         skill_counts[skill_name] = skill_counts.get(skill_name, 0) + 1
-                    
+
                     problems.append(data.get("problem", "Unknown"))
-                    
+
                     print(f"  Collected {len(skill_book)} skills from {filename}")
             except Exception as e:
                 print(f"  Warning: Failed to read {json_file}: {e}")
@@ -306,24 +316,31 @@ class SkillAggregationServer:
         """Load the embedding model for knowledge graph clustering"""
         if self.embedding_model is not None:
             return
-        
+
         try:
             print(f"Loading embedding model: {self.embedding_model_name}")
             # Suppress transformers loading warnings and progress bars
             import logging
+
             # Suppress transformers warnings
             os.environ["TRANSFORMERS_VERBOSITY"] = "error"
             logging.getLogger("transformers.modeling_utils").setLevel(logging.ERROR)
-            logging.getLogger("transformers.configuration_utils").setLevel(logging.ERROR)
-            
+            logging.getLogger("transformers.configuration_utils").setLevel(
+                logging.ERROR
+            )
+
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 # Ensure device is properly set for embedding model
-                embedding_device = self.device if self.device else ("cuda" if torch.cuda.is_available() else "cpu")
+                embedding_device = (
+                    self.device
+                    if self.device
+                    else ("cuda" if torch.cuda.is_available() else "cpu")
+                )
                 self.embedding_model = SentenceTransformer(
-                    self.embedding_model_name, 
+                    self.embedding_model_name,
                     device=embedding_device,
-                    show_progress_bar=False
+                    show_progress_bar=False,
                 )
                 print(f"Embedding model device: {embedding_device}")
             print("Embedding model loaded successfully!")
@@ -332,52 +349,59 @@ class SkillAggregationServer:
                 "sentence-transformers is required. Install with: pip install sentence-transformers"
             )
         except Exception as e:
-            raise RuntimeError(f"Failed to load embedding model {self.embedding_model_name}: {e}")
-    
-    def _step_knowledge_graph_clustering(self, skill_store: Dict, r1: float = 0.9, r2: float = 0.4) -> Dict:
+            raise RuntimeError(
+                f"Failed to load embedding model {self.embedding_model_name}: {e}"
+            )
+
+    def _step_knowledge_graph_clustering(
+        self, skill_store: Dict, r1: float = 0.9, r2: float = 0.4
+    ) -> Dict:
         """Step 2: Build knowledge graph and cluster skills using embeddings"""
         print("Building knowledge graph with embeddings...")
-        
+
         # Load embedding model
         self._load_embedding_model()
-        
+
         # Prepare skill texts for embedding
         skill_names = list(skill_store.keys())
         skill_texts = [f"{name}: {desc}" for name, desc in skill_store.items()]
-        
+
         # Compute embeddings
         print(f"Computing embeddings for {len(skill_texts)} skills...")
         # Use show_progress_bar based on environment - disable in non-interactive environments
         import sys
-        show_progress = sys.stdout.isatty()  # Only show progress bar if running in terminal
+
+        show_progress = (
+            sys.stdout.isatty()
+        )  # Only show progress bar if running in terminal
         embeddings = self.embedding_model.encode(
-            skill_texts, 
-            convert_to_numpy=True, 
+            skill_texts,
+            convert_to_numpy=True,
             show_progress_bar=show_progress,
-            batch_size=32  # Process in batches for better performance
+            batch_size=32,  # Process in batches for better performance
         )
-        
+
         # Normalize embeddings for cosine similarity
         embeddings_norm = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
-        
+
         # Compute pairwise cosine similarity
         print("Computing pairwise cosine similarities...")
         similarity_matrix = cosine_similarity(embeddings_norm)
-        
+
         # Normalize similarity to [0, 1] range (cosine similarity is already in [-1, 1])
         # Map from [-1, 1] to [0, 1]
         similarity_matrix = (similarity_matrix + 1) / 2
-        
+
         # Build graph: nodes are skills, edges are linked skills (r2 <= similarity < r1)
         same_skills = defaultdict(set)  # Groups of identical skills (similarity >= r1)
         graph_edges = []  # Edges for linked skills (r2 <= similarity < r1)
         skill_to_group = {}  # Map skill to its same_skills group
-        
+
         print(f"Building graph with thresholds: r1={r1} (same skill), r2={r2} (linked)")
         for i in range(len(skill_names)):
             for j in range(i + 1, len(skill_names)):
                 sim = similarity_matrix[i][j]
-                
+
                 if sim >= r1:
                     # Same skill - merge into group (not added as edge)
                     if i not in skill_to_group and j not in skill_to_group:
@@ -400,7 +424,7 @@ class SkillAggregationServer:
                 elif sim >= r2:
                     # Linked skills - add edge (r2 <= similarity < r1)
                     graph_edges.append((i, j, sim))
-        
+
         # Build clusters from connected components in the graph
         # Each connected component is a cluster
         print("Building clusters from graph connected components...")
@@ -408,11 +432,11 @@ class SkillAggregationServer:
         for i, j, sim in graph_edges:
             adjacency[i].add(j)
             adjacency[j].add(i)
-        
+
         # Find connected components (clusters)
         clusters = []
         visited = set()
-        
+
         def get_connected_component(node: int) -> Set[int]:
             """Get all nodes in the connected component"""
             component = set()
@@ -428,65 +452,79 @@ class SkillAggregationServer:
                         if neighbor not in visited:
                             stack.append(neighbor)
             return component
-        
+
         for i in range(len(skill_names)):
             if i in visited:
                 continue
-            
+
             # Get connected component
             component = get_connected_component(i)
-            
+
             if len(component) > 1:  # Only create cluster if more than 1 node
                 clusters.append(component)
-        
+
         # Convert to skill names
         same_skills_groups = {
             group_id: [skill_names[i] for i in group]
             for group_id, group in same_skills.items()
         }
-        
-        clusters_named = [
-            [skill_names[i] for i in cluster]
-            for cluster in clusters
-        ]
-        
+
+        clusters_named = [[skill_names[i] for i in cluster] for cluster in clusters]
+
         print(f"Found {len(same_skills_groups)} groups of identical skills")
         print(f"Found {len(clusters_named)} clusters (connected components)")
-        
+
         # Build GraphRAG database
         graphrag_data = self._build_graphrag_database(
-            skill_names, skill_store, embeddings_norm, similarity_matrix, 
-            same_skills_groups, clusters_named, graph_edges, r1, r2
+            skill_names,
+            skill_store,
+            embeddings_norm,
+            similarity_matrix,
+            same_skills_groups,
+            clusters_named,
+            graph_edges,
+            r1,
+            r2,
         )
-        
+
         step_result = {
             "step": 2,
             "name": "Knowledge Graph Clustering",
             "same_skills_groups": same_skills_groups,
             "clusters": clusters_named,
             "similarity_matrix": similarity_matrix.tolist(),
-            "graph_edges": [(skill_names[i], skill_names[j], float(sim)) for i, j, sim in graph_edges],
+            "graph_edges": [
+                (skill_names[i], skill_names[j], float(sim))
+                for i, j, sim in graph_edges
+            ],
             "graphrag_data": graphrag_data,
             "timestamp": time.time(),
         }
-        
+
         self.aggregation_steps.append(step_result)
         return step_result
 
     def _build_graphrag_database(
-        self, skill_names: List[str], skill_store: Dict, embeddings: np.ndarray,
-        similarity_matrix: np.ndarray, same_skills_groups: Dict, clusters: List[List[str]],
-        graph_edges: List[Tuple[int, int, float]], r1: float, r2: float
+        self,
+        skill_names: List[str],
+        skill_store: Dict,
+        embeddings: np.ndarray,
+        similarity_matrix: np.ndarray,
+        same_skills_groups: Dict,
+        clusters: List[List[str]],
+        graph_edges: List[Tuple[int, int, float]],
+        r1: float,
+        r2: float,
     ) -> Dict:
         """Build GraphRAG database with graph structure and embeddings"""
         print("Building GraphRAG database...")
-        
+
         # Create graph structure
         if HAS_NETWORKX:
             G = nx.Graph()
         else:
             G = None
-        
+
         # Add nodes (skills)
         nodes = {}
         for idx, skill_name in enumerate(skill_names):
@@ -499,7 +537,7 @@ class SkillAggregationServer:
             nodes[skill_name] = node_data
             if G is not None:
                 G.add_node(skill_name, **node_data)
-        
+
         # Add edges based on similarity
         edges = []
         for i, j, sim in graph_edges:
@@ -510,14 +548,10 @@ class SkillAggregationServer:
                 "similarity": float(sim),
                 "type": edge_type,
             }
-            edges.append({
-                "source": skill_i,
-                "target": skill_j,
-                **edge_data
-            })
+            edges.append({"source": skill_i, "target": skill_j, **edge_data})
             if G is not None:
                 G.add_edge(skill_i, skill_j, **edge_data)
-        
+
         # Store same skills groups as node attributes
         for group_id, group_skills in same_skills_groups.items():
             for skill_name in group_skills:
@@ -525,7 +559,7 @@ class SkillAggregationServer:
                     nodes[skill_name]["same_skills_group"] = group_id
                     if G is not None:
                         G.nodes[skill_name]["same_skills_group"] = group_id
-        
+
         # Store cluster information
         for cluster_id, cluster_skills in enumerate(clusters):
             for skill_name in cluster_skills:
@@ -537,7 +571,7 @@ class SkillAggregationServer:
                         if "clusters" not in G.nodes[skill_name]:
                             G.nodes[skill_name]["clusters"] = []
                         G.nodes[skill_name]["clusters"].append(cluster_id)
-        
+
         graphrag_data = {
             "nodes": nodes,
             "edges": edges,
@@ -548,12 +582,18 @@ class SkillAggregationServer:
             "similarity_matrix": similarity_matrix.tolist(),
             "graph_format": "networkx" if HAS_NETWORKX else "dict",
         }
-        
+
         print(f"GraphRAG database built: {len(nodes)} nodes, {len(edges)} edges")
         return graphrag_data
 
     def _get_cluster_summary_prompt(
-        self, same_skills_groups: Dict, clusters: List[List[str]], skill_store: Dict, existing_encyclopedia: str = "", r1: float = 0.9, r2: float = 0.4
+        self,
+        same_skills_groups: Dict,
+        clusters: List[List[str]],
+        skill_store: Dict,
+        existing_encyclopedia: str = "",
+        r1: float = 0.9,
+        r2: float = 0.4,
     ) -> str:
         """Get the prompt for merging same skills and summarizing clusters"""
         # Format same skills groups
@@ -561,29 +601,35 @@ class SkillAggregationServer:
         for group_id, skill_names in same_skills_groups.items():
             same_skills_text += f"\nGroup {group_id} (merge these into one skill):\n"
             for skill_name in skill_names:
-                same_skills_text += f"  - {skill_name}: {skill_store.get(skill_name, 'N/A')}\n"
-        
+                same_skills_text += (
+                    f"  - {skill_name}: {skill_store.get(skill_name, 'N/A')}\n"
+                )
+
         # Format clusters
         clusters_text = ""
         for cluster_id, cluster_skills in enumerate(clusters):
             clusters_text += f"\nCluster {cluster_id}:\n"
             clusters_text += "  Skills in this cluster:\n"
             for skill_name in cluster_skills:
-                clusters_text += f"    - {skill_name}: {skill_store.get(skill_name, 'N/A')}\n"
-        
+                clusters_text += (
+                    f"    - {skill_name}: {skill_store.get(skill_name, 'N/A')}\n"
+                )
+
         # Get all unique skills (not in same_skills_groups)
         all_skill_names = set(skill_store.keys())
         merged_skill_names = set()
         for group in same_skills_groups.values():
             merged_skill_names.update(group)
         standalone_skills = all_skill_names - merged_skill_names
-        
+
         standalone_text = ""
         if standalone_skills:
             standalone_text = "\nStandalone Skills (keep as-is):\n"
             for skill_name in standalone_skills:
-                standalone_text += f"  - {skill_name}: {skill_store.get(skill_name, 'N/A')}\n"
-        
+                standalone_text += (
+                    f"  - {skill_name}: {skill_store.get(skill_name, 'N/A')}\n"
+                )
+
         # Format existing encyclopedia section
         existing_encyclopedia_section = ""
         if existing_encyclopedia and existing_encyclopedia.strip():
@@ -593,7 +639,7 @@ class SkillAggregationServer:
 
 Note: You should merge new skills with the existing encyclopedia, combining similar skills and adding new ones.
 """
-        
+
         prompt = f"""
 You are building a comprehensive Skills Encyclopedia from clustered skills.
 {existing_encyclopedia_section}
@@ -735,9 +781,19 @@ Output ONLY the JSON object, nothing else.
             # If extraction fails, return original text
             return text
 
-    def _step_cluster_summary(self, same_skills_groups: Dict, clusters: List[List[str]], skill_store: Dict, existing_encyclopedia: str = "", r1: float = 0.9, r2: float = 0.4) -> Dict:
+    def _step_cluster_summary(
+        self,
+        same_skills_groups: Dict,
+        clusters: List[List[str]],
+        skill_store: Dict,
+        existing_encyclopedia: str = "",
+        r1: float = 0.9,
+        r2: float = 0.4,
+    ) -> Dict:
         """Step 3: Merge same skills and summarize clusters"""
-        prompt = self._get_cluster_summary_prompt(same_skills_groups, clusters, skill_store, existing_encyclopedia, r1, r2)
+        prompt = self._get_cluster_summary_prompt(
+            same_skills_groups, clusters, skill_store, existing_encyclopedia, r1, r2
+        )
 
         system_prompt = None
         response = self._call_model(prompt, system_prompt)
@@ -769,7 +825,9 @@ Output ONLY the JSON object, nothing else.
                 with open(encyclopedia_path, "r", encoding="utf-8") as f:
                     content = f.read().strip()
                 if content:
-                    print(f"Loaded existing encyclopedia from {encyclopedia_path} ({len(content)} characters)")
+                    print(
+                        f"Loaded existing encyclopedia from {encyclopedia_path} ({len(content)} characters)"
+                    )
                     return content
             except Exception as e:
                 print(f"Warning: Could not load existing encyclopedia: {e}")
@@ -778,19 +836,21 @@ Output ONLY the JSON object, nothing else.
     def _save_graphrag_database(self, graphrag_data: Dict, output_dir: str):
         """Save GraphRAG database to disk"""
         os.makedirs(output_dir, exist_ok=True)
-        
+
         # Save as JSON (embeddings will be large but manageable)
         graphrag_path = os.path.join(output_dir, "graphrag_db.json")
         with open(graphrag_path, "w", encoding="utf-8") as f:
             json.dump(graphrag_data, f, indent=2, ensure_ascii=False)
-        
+
         # Also save embeddings separately as numpy array for faster loading
         embeddings_path = os.path.join(output_dir, "graphrag_embeddings.npy")
-        embeddings_list = [node["embedding"] for node in graphrag_data["nodes"].values()]
+        embeddings_list = [
+            node["embedding"] for node in graphrag_data["nodes"].values()
+        ]
         if embeddings_list:
             embeddings_array = np.array(embeddings_list)
             np.save(embeddings_path, embeddings_array)
-        
+
         print("GraphRAG database saved to:")
         print(f"  - {graphrag_path}")
         print(f"  - {embeddings_path}")
@@ -836,7 +896,9 @@ Output ONLY the JSON object, nothing else.
         print("STEP 2: Knowledge Graph Clustering")
         print(f"Using thresholds: r1={r1} (same skill), r2={r2} (linked)")
         print("=" * 80)
-        clustering_result = self._step_knowledge_graph_clustering(self.skill_store, r1=r1, r2=r2)
+        clustering_result = self._step_knowledge_graph_clustering(
+            self.skill_store, r1=r1, r2=r2
+        )
         same_skills_groups = clustering_result["same_skills_groups"]
         clusters = clustering_result["clusters"]
         time.sleep(1)
@@ -845,17 +907,24 @@ Output ONLY the JSON object, nothing else.
         print("\n" + "=" * 80)
         print("STEP 3: Saving GraphRAG Database and Merging Skills")
         print("=" * 80)
-        
+
         # Save GraphRAG database
         graphrag_data = clustering_result.get("graphrag_data", {})
         if graphrag_data:
             self._save_graphrag_database(graphrag_data, output_dir)
-        
+
         # Load existing encyclopedia if it exists
         existing_encyclopedia = self._load_existing_encyclopedia(output_dir)
         if existing_encyclopedia:
             print("Found existing encyclopedia - will merge with new skills")
-        self._step_cluster_summary(same_skills_groups, clusters, self.skill_store, existing_encyclopedia, r1=r1, r2=r2)
+        self._step_cluster_summary(
+            same_skills_groups,
+            clusters,
+            self.skill_store,
+            existing_encyclopedia,
+            r1=r1,
+            r2=r2,
+        )
 
         # Compile results
         result = {
@@ -863,7 +932,9 @@ Output ONLY the JSON object, nothing else.
             "behavior_bookstore": self.skill_store,  # Keep for compatibility
             "collection_metadata": {
                 "files_processed": collection_result.get("files_processed", 0),
-                "total_skills_collected": collection_result.get("total_skills_collected", 0),
+                "total_skills_collected": collection_result.get(
+                    "total_skills_collected", 0
+                ),
                 "unique_skills": collection_result.get("unique_skills", 0),
                 "problems": collection_result.get("problems", []),
                 "collected_books": collection_result.get("collected_books", {}),
@@ -959,10 +1030,7 @@ if __name__ == "__main__":
     try:
         # Run aggregation pipeline
         result = server.aggregate_and_build_encyclopedia(
-            json_files=args.files,
-            r1=args.r1,
-            r2=args.r2,
-            output_dir=args.output_dir
+            json_files=args.files, r1=args.r1, r2=args.r2, output_dir=args.output_dir
         )
 
         # Save results

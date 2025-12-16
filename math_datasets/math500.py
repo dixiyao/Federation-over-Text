@@ -1,4 +1,6 @@
-math500_prompt = "\nSolve the problem step by step. Wrap your final answer in \"\\boxed{}\"."
+math500_prompt = (
+    '\nSolve the problem step by step. Wrap your final answer in "\\boxed{}".'
+)
 
 
 def math500_formatter(example):
@@ -17,13 +19,13 @@ def accuracy(predictions, answers):
     """
     correct = 0
     total = len(predictions)
- 
+
     for prediction, answer in zip(predictions, answers):
         if prediction == answer:
             correct += 1
 
     return correct / total if total > 0 else 0.0
-    
+
 
 def math500_scorer(predictions, answers):
     """
