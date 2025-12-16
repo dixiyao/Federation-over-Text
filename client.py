@@ -277,71 +277,36 @@ Focus on extracting actionable knowledge that can guide future problem-solving.
         return prompt
 
     def _get_behavior_prompt(self, problem: str, solution: str, reflection: str) -> str:
-        """Step 3: Generate actionable, instruction-based skills (like Claude Agent Skills)"""
+        """Step 3: Generate simple skills with name and description"""
         prompt_template = """
-You are creating reusable, instruction-based skills that can guide an LLM or agent to solve similar problems step-by-step.
+Extract reusable skills from the solution below. Output a JSON object with skill names and descriptions.
 
 Problem: {problem}
 
-Step-by-Step Solution: {solution}
+Solution: {solution}
 
-Insights and Learnings: {reflection}
+Reflection: {reflection}
 
-Your task: Generate concrete, actionable skills in JSON format. Each skill should be like a mini-guide that an agent can follow.
+**Output Format:**
+Output a valid JSON object where:
+- Each key is a skill name starting with "skill_"
+- Each value is a clear description string explaining what the skill does and how to use it
 
-**Skill Requirements:**
-1. Each skill must be **actionable** - provide clear, step-by-step instructions
-2. Each skill must include **concrete steps** - not vague descriptions
-3. Each skill must include **insights** - explain why and when to use it
-4. Each skill must be **reusable** - applicable to similar problems, not just this one
-5. Skills should be formatted like agent skills: clear instructions that guide step-by-step reasoning
-
-**CRITICAL: Output Format Requirements**
-You MUST output a valid JSON object with the following EXACT structure:
-- The JSON object must have keys that are skill names (each must start with "skill_")
-- Each skill name maps to a STRING description (not a nested object, not an array)
-- The description string should contain all information in a single, well-formatted text
-- Use \\n for newlines within strings
-- Use numbered format "1) 2) 3)" for steps (no periods after numbers)
-
-**Required JSON Structure (each value is a single string):**
+**Example:**
 {{
-  "skill_name1": "When to use: [description]\\n\\nStep-by-step: 1) [step1] 2) [step2] 3) [step3]\\n\\nKey insights: [insights]\\n\\nExample: [example]",
-  "skill_name2": "When to use: [description]\\n\\nStep-by-step: 1) [step1] 2) [step2]\\n\\nKey insights: [insights]\\n\\nExample: [example]"
+  "skill_polynomialFactoring": "Factor polynomial expressions by identifying common patterns like difference of squares or perfect square trinomials, then apply appropriate factoring technique.",
+  "skill_systematicSubstitution": "Solve systems of equations by expressing one variable in terms of others, then substituting into other equations to simplify."
 }}
 
-**DO NOT use nested objects or arrays. Each skill value MUST be a single string.**
+**Rules:**
+1. Output ONLY valid JSON - no markdown, no comments, no extra text
+2. Skill names must start with "skill_"
+3. Descriptions must be clear strings (not objects or arrays)
+4. Use double quotes for all strings
+5. No trailing commas
+6. Extract only skills actually used in the solution
 
-**Skill Content Requirements (all within one string per skill):**
-1. **When to use**: Under what conditions this skill applies (1-2 sentences)
-2. **Step-by-step**: Numbered list of concrete, actionable steps (format: "1) [step] 2) [step] 3) [step]")
-3. **Key insights**: Why this approach works and what to watch for (1-2 sentences)
-4. **Example**: Brief note on how it was used in this problem (1 sentence)
-
-**Example of Correct Format:**
-{{
-  "skill_polynomialFactoring": "When to use: When solving equations with polynomial expressions that can be factored.\\n\\nStep-by-step: 1) Identify common factors or patterns (difference of squares, perfect square trinomials, etc.) 2) Apply appropriate factoring technique 3) Set each factor equal to zero 4) Solve resulting equations\\n\\nKey insights: Factoring reduces complex polynomials to simpler linear/quadratic equations. Look for patterns like a²-b²=(a-b)(a+b).\\n\\nExample: Used to factor x²-9=(x-3)(x+3) in quadratic equation solving.",
-  "skill_systematicSubstitution": "When to use: When dealing with systems of equations or complex expressions with multiple variables.\\n\\nStep-by-step: 1) Identify which variable to substitute 2) Express one variable in terms of others from one equation 3) Substitute into other equations 4) Simplify and solve 5) Back-substitute to find remaining variables\\n\\nKey insights: Reduces multi-variable problems to single-variable problems. Choose substitutions that simplify the most.\\n\\nExample: Used to solve system by expressing y in terms of x, then substituting into second equation."
-}}
-
-**CRITICAL Rules - Follow Exactly:**
-1. Output ONLY valid JSON - no markdown code blocks (```json), no explanations, no extra text before or after
-2. Each skill name MUST start with "skill_"
-3. Each skill value MUST be a single string (NOT an object like {{"when_to_use": "...", "step_by_step": [...]}})
-4. Use \\n for newlines within strings
-5. Use numbered format "1) 2) 3)" for steps (no periods after numbers)
-6. Only extract skills that are actually present in the solution
-7. Each skill must have concrete, actionable steps
-8. Ensure all JSON keys and string values are properly quoted with double quotes
-9. Do not include trailing commas
-10. DO NOT use nested objects - if you see a structure like {{"when_to_use": "...", "step_by_step_instructions": [...]}}, convert it to a single string
-
-**CORRECT Format (USE THIS):**
-{{
-  "skill_name": "When to use: ...\\n\\nStep-by-step: 1) step1 2) step2\\n\\nKey insights: insight1 insight2\\n\\nExample: ..."
-}}
-
-**Output your response as a valid JSON object only (no markdown, no code blocks):**
+**Output your JSON:**
                 """
         prompt = prompt_template.format(
             problem=problem, solution=solution, reflection=reflection
@@ -453,17 +418,27 @@ You MUST output a valid JSON object with the following EXACT structure:
                     json_str = re.sub(r'//.*?(?=\n|$)', '', json_str)  # End-of-line comments
                     json_str = re.sub(r'/\*.*?\*/', '', json_str, flags=re.DOTALL)  # /* */ comments
                     
-                    # Step 2: Remove trailing commas before closing braces/brackets
+                    # Step 2: Remove trailing text after the JSON object (common in LLM outputs)
+                    # Find the last complete closing brace
+                    last_brace = json_str.rfind('}')
+                    if last_brace != -1:
+                        # Check if there's text after the last brace that might be causing issues
+                        text_after = json_str[last_brace+1:].strip()
+                        if text_after and not text_after.startswith('}'):
+                            # Keep only up to the last complete brace
+                            json_str = json_str[:last_brace+1]
+                    
+                    # Step 3: Remove trailing commas before closing braces/brackets
                     json_str = re.sub(r',\s*}', '}', json_str)
                     json_str = re.sub(r',\s*]', ']', json_str)
                     
-                    # Step 3: Try parsing first
+                    # Step 4: Try parsing first
                     try:
                         json_data = json.loads(json_str)
                     except json.JSONDecodeError as e:
                         # If parsing fails, try to fix more issues
                         # Remove trailing commas more aggressively (multiple passes)
-                        for _ in range(3):  # Multiple passes to catch nested commas
+                        for _ in range(5):  # More passes to catch nested commas
                             json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)
                         
                         # Fix single quotes to double quotes (but be careful with strings)
@@ -478,12 +453,42 @@ You MUST output a valid JSON object with the following EXACT structure:
                         # Remove any empty lines that might have been left by comment removal
                         json_str = re.sub(r'\n\s*\n', '\n', json_str)
                         
+                        # Try to fix unclosed strings or incomplete JSON
+                        # If the JSON seems incomplete, try to extract what we can
+                        brace_count = json_str.count('{') - json_str.count('}')
+                        if brace_count > 0:
+                            # Add missing closing braces
+                            json_str = json_str + '}' * brace_count
+                        elif brace_count < 0:
+                            # Remove extra closing braces from the end
+                            for _ in range(-brace_count):
+                                last_brace = json_str.rfind('}')
+                                if last_brace != -1:
+                                    json_str = json_str[:last_brace] + json_str[last_brace+1:]
+                        
                         # Try again
                         try:
                             json_data = json.loads(json_str)
-                        except json.JSONDecodeError:
-                            # If still failing, raise the original error for better debugging
-                            raise e
+                        except json.JSONDecodeError as e2:
+                            # Last resort: try to extract skills using regex pattern matching
+                            # Extract all skill_*: "description" patterns
+                            skill_pattern = r'"skill_\w+"\s*:\s*"([^"]*(?:\\.[^"]*)*)"'
+                            matches = re.findall(skill_pattern, json_str)
+                            if matches:
+                                # Reconstruct a valid JSON object from extracted skills
+                                skills_dict = {}
+                                skill_name_pattern = r'"skill_\w+"'
+                                skill_names = re.findall(skill_name_pattern, json_str)
+                                for i, name in enumerate(skill_names):
+                                    if i < len(matches):
+                                        skills_dict[name.strip('"')] = matches[i].replace('\\n', '\n').replace('\\"', '"')
+                                if skills_dict:
+                                    json_data = skills_dict
+                                else:
+                                    raise e
+                            else:
+                                # If still failing, raise the original error for better debugging
+                                raise e
                     
                     # Handle both dict and list formats
                     if isinstance(json_data, list):
