@@ -187,7 +187,7 @@ class ChainOfThoughtReader:
             
             # Generate response
             with torch.no_grad():
-                # DeepSeek-R1 recommendations: temperature 0.5-0.7 (0.6 recommended)
+                # DeepSeek-R1 recommendations: temperature 0.6, top_p 0.95, repetition_penalty 1.8
                 # Check if model name contains "DeepSeek-R1" to use recommended settings
                 is_deepseek_r1 = "DeepSeek-R1" in self.model_name
                 
@@ -197,9 +197,9 @@ class ChainOfThoughtReader:
                         **inputs,
                         max_new_tokens=max_new_tokens,
                         do_sample=True,
-                        top_p=0.9,
-                        temperature=0.7,
-                        repetition_penalty=1.2,
+                        top_p=0.95,
+                        temperature=0.6,
+                        repetition_penalty=1.8,
                         use_cache=True,
                         pad_token_id=self.tokenizer.eos_token_id,
                     )
@@ -211,7 +211,7 @@ class ChainOfThoughtReader:
                         temperature=0.7,
                         do_sample=True,
                         top_p=0.9,
-                        repetition_penalty=1.2,  # Penalize repetition to avoid loops
+                        repetition_penalty=1.1,
                         pad_token_id=self.tokenizer.eos_token_id,
                     )
             
@@ -317,27 +317,30 @@ Each skill description must contain these four sections:
 **Output Format:**
 Simple JSON object: {{"skill_name": "description"}}
 - Skill name must start with "skill_"
-- Description is a single string with all four sections
-- Use \\n\\n to separate sections
+- Description is a single string containing all information
+- Use semicolons (;) to separate sections, NOT newlines
 - Use numbered format "1) 2) 3)" for steps (no periods after numbers)
+- Keep descriptions concise and focused - avoid long run-on sentences
 
 **Example Format:**
 {{
-  "skill_polynomialFactoring": "When to use: When solving equations with polynomial expressions that can be factored, especially when the polynomial has recognizable patterns like difference of squares or perfect square trinomials.\\n\\nStep-by-step: 1) Examine the polynomial structure to identify common patterns (difference of squares: a²-b², perfect square trinomials: a²±2ab+b², common factors) 2) Apply the appropriate factoring technique based on the identified pattern 3) Set each factor equal to zero to create simpler equations 4) Solve the resulting linear or quadratic equations 5) Verify solutions by substituting back into the original equation",
-  "skill_systematicSubstitution": "When to use: When dealing with systems of equations or complex expressions with multiple variables where one variable can be expressed in terms of others, making the problem more manageable.\\n\\nStep-by-step: 1) Identify which variable to substitute by finding the simplest relationship 2) Express one variable in terms of others from one equation 3) Substitute this expression into other equations in the system 4) Simplify the resulting equation(s) to reduce the number of variables 5) Solve for the remaining variable(s) 6) Back-substitute to find the values of all variables 7) Verify the solution satisfies all original equations."
+  "skill_polynomialFactoring": "When to use: When solving equations with polynomial expressions that can be factored, especially when the polynomial has recognizable patterns like difference of squares or perfect square trinomials. Step-by-step: 1) Examine the polynomial structure to identify common patterns (difference of squares: a²-b², perfect square trinomials: a²±2ab+b², common factors) 2) Apply the appropriate factoring technique based on the identified pattern 3) Set each factor equal to zero to create simpler equations 4) Solve the resulting linear or quadratic equations 5) Verify solutions by substituting back into the original equation",
+  "skill_systematicSubstitution": "When to use: When dealing with systems of equations or complex expressions with multiple variables where one variable can be expressed in terms of others, making the problem more manageable. Step-by-step: 1) Identify which variable to substitute by finding the simplest relationship 2) Express one variable in terms of others from one equation 3) Substitute this expression into other equations in the system 4) Simplify the resulting equation(s) to reduce the number of variables 5) Solve for the remaining variable(s) 6) Back-substitute to find the values of all variables 7) Verify the solution satisfies all original equations."
 }}
 
 **CRITICAL Rules:**
 1. Output ONLY valid JSON - no markdown code blocks, no comments, no extra text before or after
 2. Each skill name MUST start with "skill_"
 3. Each skill value MUST be a single string (NOT an object or array)
-4. Use \\n\\n to separate sections within the description string
+4. Use semicolons (;) to separate sections within the description string, NOT newlines or \\n
 5. Steps must be numbered: 1) 2) 3) (no periods after numbers)
 6. Only extract skills that are actually present and used in the solution
 7. Each skill must have concrete, actionable steps
-8. Ensure all JSON keys and string values are properly quoted with double quotes
-9. Do not include trailing commas
-10. DO NOT use nested objects - everything must be in a single string value
+8. Keep descriptions concise - avoid listing every possible application or creating extremely long descriptions
+9. Ensure all JSON keys and string values are properly quoted with double quotes
+10. Do not include trailing commas
+11. DO NOT use nested objects - everything must be in a single string value
+12. Focus on the core skill and its essential steps - be specific but not exhaustive
 
 **Output your response as a valid JSON object only (no markdown, no code blocks):**
                 """
@@ -395,305 +398,141 @@ Simple JSON object: {{"skill_name": "description"}}
         response = self._call_model(prompt, system_prompt, max_new_tokens=32768)
         print(f"Skill Extraction Response: {response}") 
 
-        # Parse skills from response with validation
+        # Parse skills from response - simple extraction: just name and description
+        # Replace \n\n with ; in descriptions for easier parsing
         skills = {}
-        formatted_json_array = []
         validation_errors = []
         
         try:
-            # First, try to extract JSON from markdown code blocks (```json ... ```)
+            # Extract JSON object from response
+            json_str = None
+            
+            # Try to extract JSON from markdown code blocks
             json_code_block = re.search(
-                r"```(?:json)?\s*(\[.*?\]|\{.*?\})\s*```", response, re.DOTALL
+                r"```(?:json)?\s*(\{.*?\})\s*```", response, re.DOTALL
             )
             if json_code_block:
                 json_str = json_code_block.group(1)
             else:
-                # Try to find JSON object {...} - use greedy match to get the full object
-                # Match from first { to last } (handles nested objects)
+                # Find JSON object using brace counting
                 brace_count = 0
                 start_idx = response.find('{')
                 if start_idx != -1:
+                    in_string = False
+                    escape_next = False
                     for i in range(start_idx, len(response)):
-                        if response[i] == '{':
-                            brace_count += 1
-                        elif response[i] == '}':
-                            brace_count -= 1
-                            if brace_count == 0:
-                                json_str = response[start_idx:i+1]
-                                break
-                    else:
-                        json_str = None
-                else:
-                    # Try to find JSON array [...]
-                    bracket_count = 0
-                    start_idx = response.find('[')
-                    if start_idx != -1:
-                        for i in range(start_idx, len(response)):
-                            if response[i] == '[':
-                                bracket_count += 1
-                            elif response[i] == ']':
-                                bracket_count -= 1
-                                if bracket_count == 0:
+                        char = response[i]
+                        if escape_next:
+                            escape_next = False
+                            continue
+                        if char == '\\':
+                            escape_next = True
+                            continue
+                        if char == '"' and not escape_next:
+                            in_string = not in_string
+                            continue
+                        if not in_string:
+                            if char == '{':
+                                brace_count += 1
+                            elif char == '}':
+                                brace_count -= 1
+                                if brace_count == 0:
                                     json_str = response[start_idx:i+1]
                                     break
-                        else:
-                            json_str = None
                     else:
-                        json_str = None
+                        # If incomplete, try to find last complete brace
+                        last_brace = response.rfind('}', start_idx)
+                        if last_brace != -1:
+                            json_str = response[start_idx:last_brace+1]
 
             if json_str:
                 try:
-                    # Clean up common JSON issues
-                    # Step 1: Remove comments (both // and /* */ style)
-                    # Remove // comments (entire lines or at end of lines)
-                    json_str = re.sub(r'^\s*//.*?$', '', json_str, flags=re.MULTILINE)  # Full-line comments
-                    json_str = re.sub(r'//.*?(?=\n|$)', '', json_str)  # End-of-line comments
-                    json_str = re.sub(r'/\*.*?\*/', '', json_str, flags=re.DOTALL)  # /* */ comments
-                    
-                    # Step 2: Remove trailing text after the JSON object (common in LLM outputs)
-                    # Find the last complete closing brace
-                    last_brace = json_str.rfind('}')
-                    if last_brace != -1:
-                        # Check if there's text after the last brace that might be causing issues
-                        text_after = json_str[last_brace+1:].strip()
-                        if text_after and not text_after.startswith('}'):
-                            # Keep only up to the last complete brace
-                            json_str = json_str[:last_brace+1]
-                    
-                    # Step 3: Remove trailing commas before closing braces/brackets
+                    # Clean up JSON: remove comments and trailing commas
+                    json_str = re.sub(r'^\s*//.*?$', '', json_str, flags=re.MULTILINE)
+                    json_str = re.sub(r'//.*?(?=\n|$)', '', json_str)
+                    json_str = re.sub(r'/\*.*?\*/', '', json_str, flags=re.DOTALL)
                     json_str = re.sub(r',\s*}', '}', json_str)
                     json_str = re.sub(r',\s*]', ']', json_str)
                     
-                    # Step 4: Try parsing first
+                    # Remove trailing text after last brace
+                    last_brace = json_str.rfind('}')
+                    if last_brace != -1:
+                        text_after = json_str[last_brace+1:].strip()
+                        if text_after and not text_after.startswith('}'):
+                            json_str = json_str[:last_brace+1]
+                    
+                    # Try parsing
                     try:
                         json_data = json.loads(json_str)
                     except json.JSONDecodeError as e:
-                        # If parsing fails, try to fix more issues
-                        # Remove trailing commas more aggressively (multiple passes)
-                        for _ in range(5):  # More passes to catch nested commas
+                        # Fix trailing commas more aggressively
+                        for _ in range(5):
                             json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)
-                        
-                        # Fix single quotes to double quotes (but be careful with strings)
-                        json_str = re.sub(r"'([^']*)':", r'"\1":', json_str)  # Keys
-                        json_str = re.sub(r":\s*'([^']*)'", r': "\1"', json_str)  # String values
-                        
-                        # Remove any remaining comments that might have been missed
-                        json_str = re.sub(r'^\s*//.*?$', '', json_str, flags=re.MULTILINE)
-                        json_str = re.sub(r'//.*?(?=\n|$)', '', json_str)
-                        json_str = re.sub(r'/\*.*?\*/', '', json_str, flags=re.DOTALL)
-                        
-                        # Remove any empty lines that might have been left by comment removal
-                        json_str = re.sub(r'\n\s*\n', '\n', json_str)
-                        
-                        # Try to fix unclosed strings or incomplete JSON
-                        # If the JSON seems incomplete, try to extract what we can
-                        brace_count = json_str.count('{') - json_str.count('}')
-                        if brace_count > 0:
-                            # Add missing closing braces
-                            json_str = json_str + '}' * brace_count
-                        elif brace_count < 0:
-                            # Remove extra closing braces from the end
-                            for _ in range(-brace_count):
-                                last_brace = json_str.rfind('}')
-                                if last_brace != -1:
-                                    json_str = json_str[:last_brace] + json_str[last_brace+1:]
-                        
-                        # Try again
-                        try:
-                            json_data = json.loads(json_str)
-                        except json.JSONDecodeError as e2:
-                            # Last resort: try to extract skills using regex pattern matching
-                            # Extract all skill_*: "description" patterns
-                            skill_pattern = r'"skill_\w+"\s*:\s*"([^"]*(?:\\.[^"]*)*)"'
-                            matches = re.findall(skill_pattern, json_str)
-                            if matches:
-                                # Reconstruct a valid JSON object from extracted skills
-                                skills_dict = {}
-                                skill_name_pattern = r'"skill_\w+"'
-                                skill_names = re.findall(skill_name_pattern, json_str)
-                                for i, name in enumerate(skill_names):
-                                    if i < len(matches):
-                                        skills_dict[name.strip('"')] = matches[i].replace('\\n', '\n').replace('\\"', '"')
-                                if skills_dict:
-                                    json_data = skills_dict
-                                else:
-                                    raise e
+                        json_str = re.sub(r"'([^']*)':", r'"\1":', json_str)
+                        json_str = re.sub(r":\s*'([^']*)'", r': "\1"', json_str)
+                        json_data = json.loads(json_str)
+                    
+                    # Extract skills: simple key-value pairs
+                    if isinstance(json_data, dict):
+                        for skill_name, skill_desc in json_data.items():
+                            # Ensure skill name starts with skill_
+                            if not skill_name.startswith("skill_"):
+                                skill_name = f"skill_{skill_name}"
+                            
+                            # Convert description to string
+                            if isinstance(skill_desc, dict):
+                                skill_desc = str(skill_desc)
+                            elif isinstance(skill_desc, list):
+                                skill_desc = " ".join(str(item) for item in skill_desc)
+                            elif not isinstance(skill_desc, str):
+                                skill_desc = str(skill_desc)
+                            
+                            # Replace \n\n with ; and normalize whitespace
+                            skill_desc = skill_desc.replace('\\n\\n', '; ').replace('\\n', ' ').replace('\n\n', '; ').replace('\n', ' ')
+                            skill_desc = re.sub(r'\s+', ' ', skill_desc).strip()
+                            
+                            # Validate: must have minimum length
+                            if len(skill_desc) >= 20:
+                                skills[skill_name] = skill_desc
                             else:
-                                # If still failing, raise the original error for better debugging
-                                raise e
-                    
-                    # Handle both dict and list formats
-                    if isinstance(json_data, list):
-                        formatted_json_array = []
-                        for item in json_data:
-                            if isinstance(item, dict):
-                                skill_name = item.get("skill_name", item.get("skill", ""))
-                                skill_desc = item.get("description", "")
-                                
-                                # Handle nested skill structure in list format
-                                if isinstance(skill_desc, dict):
-                                    # Try multiple key name variations (with underscores, spaces, camelCase, etc.)
-                                    when_to_use = (skill_desc.get("when_to_use") or skill_desc.get("when to use") or 
-                                                 skill_desc.get("When to use") or skill_desc.get("whenToUse") or "")
-                                    step_by_step = (skill_desc.get("step_by_step_instructions") or skill_desc.get("step-by-step") or 
-                                                   skill_desc.get("step_by_step") or skill_desc.get("Step-by-step") or 
-                                                   skill_desc.get("Step-by-step Instructions") or skill_desc.get("instructions") or [])
-                                    key_insights = (skill_desc.get("key_insights") or skill_desc.get("key insights") or 
-                                                  skill_desc.get("Key Insights") or skill_desc.get("insights") or 
-                                                  skill_desc.get("Insights") or [])
-                                    example = (skill_desc.get("example_application") or skill_desc.get("example application") or 
-                                              skill_desc.get("Example Application") or skill_desc.get("example") or 
-                                              skill_desc.get("Example") or "")
-                                    
-                                    # Format step-by-step instructions
-                                    if isinstance(step_by_step, list):
-                                        step_text = "\n".join([f"{i+1}) {step}" if not step.strip().startswith(str(i+1)) else step for i, step in enumerate(step_by_step)])
-                                    else:
-                                        step_text = str(step_by_step)
-                                    
-                                    # Format key insights
-                                    if isinstance(key_insights, list):
-                                        insights_text = "\n".join([f"- {insight}" for insight in key_insights])
-                                    else:
-                                        insights_text = str(key_insights)
-                                    
-                                    # Build formatted description
-                                    desc_parts = []
-                                    if when_to_use:
-                                        desc_parts.append(f"When to use: {when_to_use}")
-                                    if step_text:
-                                        desc_parts.append(f"\nStep-by-step:\n{step_text}")
-                                    if insights_text:
-                                        desc_parts.append(f"\nKey insights:\n{insights_text}")
-                                    if example:
-                                        desc_parts.append(f"\nExample: {example}")
-                                    
-                                    skill_desc = "\n".join(desc_parts)
-                                
-                                if skill_name:
-                                    if not skill_name.startswith("skill_"):
-                                        skill_name = f"skill_{skill_name}"
-                                    skills[skill_name] = skill_desc
-                                    formatted_json_array.append({"skill_name": skill_name, "description": skill_desc})
-                    elif isinstance(json_data, dict):
-                        skills = {}
-                        formatted_json_array = []
-                        for k, v in json_data.items():
-                            # Handle nested skill structure (dict with when_to_use, step_by_step_instructions, etc.)
-                            if isinstance(v, dict):
-                                # Convert nested dict to formatted string
-                                # Try multiple key name variations (with underscores, spaces, camelCase, etc.)
-                                when_to_use = (v.get("when_to_use") or v.get("when to use") or 
-                                             v.get("When to use") or v.get("whenToUse") or "")
-                                step_by_step = (v.get("step_by_step_instructions") or v.get("step-by-step") or 
-                                               v.get("step_by_step") or v.get("Step-by-step") or 
-                                               v.get("Step-by-step Instructions") or v.get("instructions") or [])
-                                key_insights = (v.get("key_insights") or v.get("key insights") or 
-                                              v.get("Key Insights") or v.get("insights") or 
-                                              v.get("Insights") or [])
-                                example = (v.get("example_application") or v.get("example application") or 
-                                          v.get("Example Application") or v.get("example") or 
-                                          v.get("Example") or "")
-                                
-                                # Format step-by-step instructions
-                                if isinstance(step_by_step, list):
-                                    step_text = "\n".join([f"{i+1}) {step}" if not step.strip().startswith(str(i+1)) else step for i, step in enumerate(step_by_step)])
-                                else:
-                                    step_text = str(step_by_step)
-                                
-                                # Format key insights
-                                if isinstance(key_insights, list):
-                                    insights_text = "\n".join([f"- {insight}" for insight in key_insights])
-                                else:
-                                    insights_text = str(key_insights)
-                                
-                                # Build formatted description
-                                desc_parts = []
-                                if when_to_use:
-                                    desc_parts.append(f"When to use: {when_to_use}")
-                                if step_text:
-                                    desc_parts.append(f"\nStep-by-step:\n{step_text}")
-                                if insights_text:
-                                    desc_parts.append(f"\nKey insights:\n{insights_text}")
-                                if example:
-                                    desc_parts.append(f"\nExample: {example}")
-                                
-                                formatted_desc = "\n".join(desc_parts)
-                                skills[k] = formatted_desc
-                                formatted_json_array.append({"skill_name": k, "description": formatted_desc})
-                            else:
-                                # Simple string description
-                                skills[k] = v
-                                formatted_json_array.append({"skill_name": k, "description": v})
-                    
-                    # Validate skills
-                    validated_skills = {}
-                    for skill_name, skill_desc in skills.items():
-                        # Check if skill name starts with skill_
-                        if not skill_name.startswith("skill_"):
-                            validation_errors.append(f"Skill '{skill_name}' does not start with 'skill_' prefix")
-                            continue
-                        
-                        # Handle non-string descriptions (convert dict/list to string)
-                        if isinstance(skill_desc, dict):
-                            # If it's a dict, try to extract description or convert to JSON string
-                            skill_desc = skill_desc.get("description", str(skill_desc))
-                        elif isinstance(skill_desc, list):
-                            skill_desc = " ".join(str(item) for item in skill_desc)
-                        elif not isinstance(skill_desc, str):
-                            skill_desc = str(skill_desc)
-                        
-                        # Check if description is empty or too short
-                        if not skill_desc or not isinstance(skill_desc, str) or len(skill_desc.strip()) < 20:
-                            validation_errors.append(f"Skill '{skill_name}' has empty or too short description")
-                            continue
-                        
-                        # Check if description contains actionable content
-                        skill_desc_lower = skill_desc.lower()
-                        has_steps = any(keyword in skill_desc_lower for keyword in ["step", "1)", "2)", "when to use", "how to", "instructions"])
-                        if not has_steps:
-                            validation_errors.append(f"Skill '{skill_name}' may lack concrete steps or instructions")
-                        
-                        validated_skills[skill_name] = skill_desc
-                    
-                    skills = validated_skills
+                                validation_errors.append(f"Skill '{skill_name}' has too short description")
                     
                 except json.JSONDecodeError as e:
                     print(f"Warning: JSON decode error: {e}")
                     validation_errors.append(f"JSON parsing error: {e}")
 
-            # If still no skills, try manual extraction
+            # If still no skills, try regex extraction
             if not skills:
-                print("Warning: Could not parse JSON from skill extraction. Attempting manual extraction.")
-                # Try to extract skills manually (look for skill_* patterns)
-                skill_pattern = r'["\']?(skill_\w+)["\']?\s*[:=]\s*["\']?([^"\']+)["\']?'
-                matches = re.findall(skill_pattern, response)
-                for name, desc in matches:
-                    if len(desc.strip()) >= 20:
-                        skills[name] = desc.strip()
+                print("Warning: Could not parse JSON. Attempting regex extraction.")
+                # Extract skill_name: "description" patterns
+                skill_pattern = r'"skill_\w+"\s*:\s*"([^"]*(?:\\.[^"]*)*)"'
+                name_pattern = r'"skill_\w+"'
+                names = re.findall(name_pattern, response)
+                descriptions = re.findall(skill_pattern, response)
+                
+                for i, name in enumerate(names):
+                    if i < len(descriptions):
+                        skill_name = name.strip('"')
+                        skill_desc = descriptions[i].replace('\\n', ' ').replace('\\"', '"')
+                        # Replace \n\n with ;
+                        skill_desc = skill_desc.replace('\n\n', '; ').replace('\n', ' ')
+                        skill_desc = re.sub(r'\s+', ' ', skill_desc).strip()
+                        if len(skill_desc) >= 20:
+                            skills[skill_name] = skill_desc
+                
                 if not skills:
                     validation_errors.append("Could not extract any skills from response")
+                    
         except Exception as e:
-            print(f"Warning: Error parsing skills: {e}. Storing raw response.")
+            print(f"Warning: Error parsing skills: {e}")
             validation_errors.append(f"Exception during parsing: {e}")
-            if not skills:
-                skills = {"raw_response": response}
         
-        # Sanity check: Ensure we have at least one valid skill
-        # Filter valid skills, handling non-string values
+        # Filter valid skills
         valid_skills = {}
         for k, v in skills.items():
             if not k.startswith("skill_"):
                 continue
-            # Convert non-string values to strings
-            if isinstance(v, dict):
-                v = v.get("description", str(v))
-            elif isinstance(v, list):
-                v = " ".join(str(item) for item in v)
-            elif not isinstance(v, str):
-                v = str(v)
-            # Check if valid string with sufficient length
-            if v and isinstance(v, str) and len(v.strip()) >= 20:
+            if isinstance(v, str) and len(v.strip()) >= 20:
                 valid_skills[k] = v
         if not valid_skills:
             print("WARNING: No valid skills extracted from this problem!")
@@ -707,6 +546,12 @@ Simple JSON object: {{"skill_name": "description"}}
                 print(f"  - {error}")
         
         print(f"Extracted {len(valid_skills)} valid skills: {list(valid_skills.keys())}")
+
+        # Create formatted JSON array for backward compatibility
+        formatted_json_array = [
+            {"skill_name": name, "description": desc}
+            for name, desc in valid_skills.items()
+        ]
 
         step_result = {
             "step": 3,
@@ -1055,7 +900,7 @@ if __name__ == "__main__":
         if args.single or (args.papers_dir is None and args.num_papers is None):
             result = reader.read_paper(task=args.task)
             reader.save_reasoning(result)
-            
+
             if result:
                 print("\n" + "=" * 80)
                 print("SKILL CURATION PIPELINE COMPLETE")
