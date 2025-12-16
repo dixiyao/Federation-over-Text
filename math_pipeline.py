@@ -160,9 +160,10 @@ class MathPipeline:
         """
         Step 1: Use client.py to learn skills from dataset1 (e.g., aime25).
         Each question uses a client to extract skills.
+        Skills are saved directly to output_dir as problem_*.json files.
         
         Returns:
-            Path to directory containing skill JSON files
+            Path to output directory containing skill JSON files
         """
         print("\n" + "=" * 80)
         print("STEP 1: Learning Skills from Dataset1")
@@ -181,9 +182,8 @@ class MathPipeline:
             device=self.device,
         )
         
-        # Output directory for skill books
-        skills_output_dir = os.path.join(self.output_dir, "skills")
-        os.makedirs(skills_output_dir, exist_ok=True)
+        # Ensure output directory exists (skills will be saved directly here)
+        os.makedirs(self.output_dir, exist_ok=True)
         
         # Process each problem to extract skills
         print(f"\nProcessing {len(problems)} problems to extract skills...")
@@ -212,20 +212,14 @@ class MathPipeline:
                         output_data = {
                             "problem": problem_text,
                             "problem_id": problem_data.get("id", idx),
-                            "behaviors": [
-                                {
-                                    "behavior": name.replace("skill_", "").replace("behavior_", ""),
-                                    "description": desc
-                                }
-                                for name, desc in skill_book.items()
-                            ],
                             "behavior_book": skill_book,
                         }
                     else:
                         print("  No valid skills extracted (only fallback found)")
                         continue
                     
-                    output_path = os.path.join(skills_output_dir, f"problem_{idx:04d}.json")
+                    # Save directly to output_dir (not in a subdirectory)
+                    output_path = os.path.join(self.output_dir, f"problem_{idx:04d}.json")
                     with open(output_path, "w", encoding="utf-8") as f:
                         json.dump(output_data, f, indent=2, ensure_ascii=False)
                     
@@ -241,8 +235,8 @@ class MathPipeline:
                 traceback.print_exc()
                 continue
         
-        print(f"\nCompleted skill extraction. Skills saved to: {skills_output_dir}")
-        return skills_output_dir
+        print(f"\nCompleted skill extraction. Skills saved to: {self.output_dir}")
+        return self.output_dir
 
     def aggregate_skills(self, skills_dir: str, r1: float = 0.9, r2: float = 0.4) -> str:
         """
@@ -408,7 +402,7 @@ class MathPipeline:
             r1: Threshold for same skills
             r2: Threshold for linked skills
             skills_dir: Existing skills directory (if provided, skip step 1)
-            start_from_step2: If True, use default skills_dir (math_output/skills) and skip step 1
+            start_from_step2: If True, use default output_dir (math_output) and skip step 1
         
         Returns:
             Dictionary with results and statistics
@@ -433,12 +427,19 @@ class MathPipeline:
         else:
             # Step 1: Learn skills from dataset1 (or use existing)
             if start_from_step2:
-                # Use default skills directory
-                skills_dir = os.path.join(self.output_dir, "skills")
+                # Use default output directory (skills are saved directly here)
+                skills_dir = self.output_dir
                 if not os.path.exists(skills_dir):
                     raise FileNotFoundError(
-                        f"Skills directory not found: {skills_dir}\n"
-                        f"Please run STEP 1 first or provide a valid --skills-dir"
+                        f"Output directory not found: {skills_dir}\n"
+                        "Please run STEP 1 first or provide a valid --skills-dir"
+                    )
+                # Check if there are any skill JSON files
+                json_files = [f for f in os.listdir(skills_dir) if f.endswith('.json') and f.startswith('problem_')]
+                if not json_files:
+                    raise FileNotFoundError(
+                        f"No skill files found in: {skills_dir}\n"
+                        "Please run STEP 1 first to generate skill files"
                     )
                 print(f"\nSkipping STEP 1. Using existing skills from: {skills_dir}")
             elif skills_dir:
@@ -597,7 +598,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--start-from-step2",
         action="store_true",
-        help="Start from STEP 2 using existing skills in {output_dir}/skills (default: math_output/skills)",
+        help="Start from STEP 2 using existing skills in {output_dir} (default: math_output)",
     )
     parser.add_argument(
         "--encyclopedia",

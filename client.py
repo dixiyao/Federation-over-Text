@@ -411,35 +411,79 @@ You MUST output a valid JSON object with the following EXACT structure:
             if json_code_block:
                 json_str = json_code_block.group(1)
             else:
-                # Try to find JSON object {...}
-                json_object_match = re.search(r"\{[\s\S]*?\}", response, re.DOTALL)
-                if json_object_match:
-                    json_str = json_object_match.group(0)
+                # Try to find JSON object {...} - use greedy match to get the full object
+                # Match from first { to last } (handles nested objects)
+                brace_count = 0
+                start_idx = response.find('{')
+                if start_idx != -1:
+                    for i in range(start_idx, len(response)):
+                        if response[i] == '{':
+                            brace_count += 1
+                        elif response[i] == '}':
+                            brace_count -= 1
+                            if brace_count == 0:
+                                json_str = response[start_idx:i+1]
+                                break
+                    else:
+                        json_str = None
                 else:
                     # Try to find JSON array [...]
-                    json_array_match = re.search(r"\[[\s\S]*?\]", response, re.DOTALL)
-                    if json_array_match:
-                        json_str = json_array_match.group(0)
+                    bracket_count = 0
+                    start_idx = response.find('[')
+                    if start_idx != -1:
+                        for i in range(start_idx, len(response)):
+                            if response[i] == '[':
+                                bracket_count += 1
+                            elif response[i] == ']':
+                                bracket_count -= 1
+                                if bracket_count == 0:
+                                    json_str = response[start_idx:i+1]
+                                    break
+                        else:
+                            json_str = None
                     else:
                         json_str = None
 
             if json_str:
                 try:
                     # Clean up common JSON issues
+                    # Step 1: Remove comments (both // and /* */ style)
+                    # Remove // comments (entire lines or at end of lines)
+                    json_str = re.sub(r'^\s*//.*?$', '', json_str, flags=re.MULTILINE)  # Full-line comments
+                    json_str = re.sub(r'//.*?(?=\n|$)', '', json_str)  # End-of-line comments
+                    json_str = re.sub(r'/\*.*?\*/', '', json_str, flags=re.DOTALL)  # /* */ comments
+                    
+                    # Step 2: Remove trailing commas before closing braces/brackets
                     json_str = re.sub(r',\s*}', '}', json_str)
                     json_str = re.sub(r',\s*]', ']', json_str)
-                    # Try parsing first
+                    
+                    # Step 3: Try parsing first
                     try:
                         json_data = json.loads(json_str)
-                    except json.JSONDecodeError:
+                    except json.JSONDecodeError as e:
                         # If parsing fails, try to fix more issues
-                        # Remove trailing commas more aggressively
-                        json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)
+                        # Remove trailing commas more aggressively (multiple passes)
+                        for _ in range(3):  # Multiple passes to catch nested commas
+                            json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)
+                        
                         # Fix single quotes to double quotes (but be careful with strings)
                         json_str = re.sub(r"'([^']*)':", r'"\1":', json_str)  # Keys
                         json_str = re.sub(r":\s*'([^']*)'", r': "\1"', json_str)  # String values
+                        
+                        # Remove any remaining comments that might have been missed
+                        json_str = re.sub(r'^\s*//.*?$', '', json_str, flags=re.MULTILINE)
+                        json_str = re.sub(r'//.*?(?=\n|$)', '', json_str)
+                        json_str = re.sub(r'/\*.*?\*/', '', json_str, flags=re.DOTALL)
+                        
+                        # Remove any empty lines that might have been left by comment removal
+                        json_str = re.sub(r'\n\s*\n', '\n', json_str)
+                        
                         # Try again
-                        json_data = json.loads(json_str)
+                        try:
+                            json_data = json.loads(json_str)
+                        except json.JSONDecodeError:
+                            # If still failing, raise the original error for better debugging
+                            raise e
                     
                     # Handle both dict and list formats
                     if isinstance(json_data, list):

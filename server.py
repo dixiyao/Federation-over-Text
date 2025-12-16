@@ -207,9 +207,14 @@ class SkillAggregationServer:
             # Scan input directory for JSON files
             input_path = Path(self.input_dir)
             json_files = list(input_path.glob("*.json"))
-            # Filter out metadata.json and behavior_book.json files if needed
+            # Filter out non-skill files (metadata, summary, results, etc.)
+            # Only process problem_*.json files (from math_pipeline) or other skill files
             json_files = [
-                str(f) for f in json_files if "metadata" not in f.name.lower()
+                str(f) for f in json_files 
+                if "metadata" not in f.name.lower() 
+                and "summary" not in f.name.lower()
+                and "results" not in f.name.lower()
+                and "encyclopedia" not in f.name.lower()
             ]
 
         print(f"Collecting skill books from {len(json_files)} files...")
