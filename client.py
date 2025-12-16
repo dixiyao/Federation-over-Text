@@ -343,9 +343,12 @@ Simple JSON object: {{"skill_name": "description"}}
 7. Each skill must have concrete, actionable steps
 8. Keep descriptions concise - avoid listing every possible application or creating extremely long descriptions
 9. Ensure all JSON keys and string values are properly quoted with double quotes
-10. Do not include trailing commas
-11. DO NOT use nested objects - everything must be in a single string value
-12. Focus on the core skill and its essential steps - be specific but not exhaustive
+10. Escape all double quotes inside string values with backslash: \\"
+11. Do not include trailing commas
+12. DO NOT use nested objects - everything must be in a single string value
+13. Focus on the core skill and its essential steps - be specific but not exhaustive
+14. If a description contains quotes, escape them properly: use \\" instead of "
+15. Keep each skill description on a single line in the JSON (no actual line breaks)
 
 **Output your response as a valid JSON object only (no markdown, no code blocks):**
                 """
@@ -475,7 +478,45 @@ Simple JSON object: {{"skill_name": "description"}}
                             json_str = re.sub(r",(\s*[}\]])", r"\1", json_str)
                         json_str = re.sub(r"'([^']*)':", r'"\1":', json_str)
                         json_str = re.sub(r":\s*'([^']*)'", r': "\1"', json_str)
-                        json_data = json.loads(json_str)
+                        
+                        # Try to fix unescaped quotes in string values
+                        # Use a more robust approach: extract skills using regex if JSON parsing fails
+                        try:
+                            json_data = json.loads(json_str)
+                        except json.JSONDecodeError:
+                            # Last resort: extract using regex pattern matching
+                            # This handles cases where JSON has unescaped quotes or other issues
+                            skill_pattern = r'"skill_\w+"\s*:\s*"((?:[^"\\]|\\.)*)"'
+                            name_pattern = r'"skill_\w+"'
+                            names = re.findall(name_pattern, json_str)
+                            # Try to extract descriptions more carefully
+                            descriptions = []
+                            # Find all skill definitions and extract their values
+                            for match in re.finditer(r'"skill_\w+"\s*:\s*"', json_str):
+                                start = match.end()
+                                # Find the matching closing quote, handling escaped quotes
+                                end = start
+                                while end < len(json_str):
+                                    if json_str[end] == '\\' and end + 1 < len(json_str):
+                                        end += 2
+                                        continue
+                                    if json_str[end] == '"':
+                                        # Check if this is followed by comma or closing brace
+                                        next_char = json_str[end + 1 : end + 2].strip() if end + 1 < len(json_str) else ''
+                                        if next_char in [',', '}', '']:
+                                            descriptions.append(json_str[start:end])
+                                            break
+                                    end += 1
+                            
+                            if names and descriptions and len(names) == len(descriptions):
+                                json_data = {}
+                                for i, name in enumerate(names):
+                                    if i < len(descriptions):
+                                        skill_name = name.strip('"')
+                                        skill_desc = descriptions[i].replace('\\"', '"').replace('\\n', ' ')
+                                        json_data[skill_name] = skill_desc
+                            else:
+                                raise e
 
                     # Extract skills: simple key-value pairs
                     if isinstance(json_data, dict):
