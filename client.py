@@ -304,7 +304,6 @@ Each skill description should contain:
 **Output Format:**
 Simple JSON object: {{"skill_name": "description"}}
 - Skill name must start with "skill_"
-- Description is a single string containing all four sections above
 - Use numbered format "1) 2) 3)" for steps
 
 **Example:**
