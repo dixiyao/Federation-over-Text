@@ -390,7 +390,7 @@ Based on the relevant skills above, provide a clear and comprehensive answer to 
                 outputs = self.model.generate(
                     **inputs,
                     max_new_tokens=max_tokens,
-                    temperature=0,  # Recommended for DeepSeek-R1
+                    temperature=0.6,  # Recommended for DeepSeek-R1
                     do_sample=True,
                     top_p=0.95,  # Recommended for DeepSeek-R1
                     repetition_penalty=1.1,
