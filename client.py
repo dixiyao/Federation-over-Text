@@ -193,8 +193,8 @@ class ChainOfThoughtReader:
                 
                 if is_deepseek_r1:
                     # DeepSeek-R1 recommended settings
-                    outputs = self.model.generate(
-                        **inputs,
+                outputs = self.model.generate(
+                    **inputs,
                         max_new_tokens=max_new_tokens,
                         do_sample=True,
                         top_p=0.9,
@@ -208,12 +208,12 @@ class ChainOfThoughtReader:
                     outputs = self.model.generate(
                         **inputs,
                         max_new_tokens=max_new_tokens,
-                        temperature=0.7,
-                        do_sample=True,
-                        top_p=0.9,
+                    temperature=0.7,
+                    do_sample=True,
+                    top_p=0.9,
                         repetition_penalty=1.2,  # Penalize repetition to avoid loops
-                        pad_token_id=self.tokenizer.eos_token_id,
-                    )
+                    pad_token_id=self.tokenizer.eos_token_id,
+                )
             
             # Decode response
             generated_text = self.tokenizer.decode(
@@ -277,9 +277,9 @@ Focus on extracting actionable knowledge that can guide future problem-solving.
         return prompt
 
     def _get_behavior_prompt(self, problem: str, solution: str, reflection: str) -> str:
-        """Step 3: Generate simple skills with name and description"""
+        """Step 3: Generate actionable skills with concrete steps and instructions"""
         prompt_template = """
-Extract reusable skills from the solution below. Output a JSON object with skill names and descriptions.
+Extract reusable skills from the solution below. Output simple JSON format: skill_name: skill_description
 
 Problem: {problem}
 
@@ -287,24 +287,41 @@ Solution: {solution}
 
 Reflection: {reflection}
 
+**Skill Requirements:**
+1. Each skill must be **actionable** - provide clear, step-by-step instructions
+2. Each skill must include **concrete steps** - not vague descriptions
+3. Each skill must include **insights** - explain why and when to use it
+4. Each skill must be **reusable** - applicable to similar problems, not just this one
+5. Skills should be formatted like agent skills: clear instructions that guide step-by-step reasoning
+
+**Skill Description Must Include (all within the description string):**
+Each skill description should contain:
+1. **When to use**: Under what conditions this skill applies (1-2 sentences)
+2. **Step-by-step**: Numbered list of concrete, actionable steps (format: "1) [step] 2) [step] 3) [step]")
+3. **Key insights**: Why this approach works and what to watch for (1-2 sentences)
+4. **Example**: Brief note on how it was used in this problem (1 sentence)
+
 **Output Format:**
-Output a valid JSON object where:
-- Each key is a skill name starting with "skill_"
-- Each value is a clear description string explaining what the skill does and how to use it
+Simple JSON object: {{"skill_name": "description"}}
+- Skill name must start with "skill_"
+- Description is a single string containing all four sections above
+- Use \\n\\n to separate sections within the description
+- Use numbered format "1) 2) 3)" for steps
 
 **Example:**
 {{
-  "skill_polynomialFactoring": "Factor polynomial expressions by identifying common patterns like difference of squares or perfect square trinomials, then apply appropriate factoring technique.",
-  "skill_systematicSubstitution": "Solve systems of equations by expressing one variable in terms of others, then substituting into other equations to simplify."
+  "skill_polynomialFactoring": "When to use: When solving equations with polynomial expressions that can be factored.\\n\\nStep-by-step: 1) Identify common factors or patterns (difference of squares, perfect square trinomials, etc.) 2) Apply appropriate factoring technique 3) Set each factor equal to zero 4) Solve resulting equations\\n\\nKey insights: Factoring reduces complex polynomials to simpler linear/quadratic equations. Look for patterns like a²-b²=(a-b)(a+b).\\n\\nExample: Used to factor x²-9=(x-3)(x+3) in quadratic equation solving.",
+  "skill_systematicSubstitution": "When to use: When dealing with systems of equations or complex expressions with multiple variables.\\n\\nStep-by-step: 1) Identify which variable to substitute 2) Express one variable in terms of others from one equation 3) Substitute into other equations 4) Simplify and solve 5) Back-substitute to find remaining variables\\n\\nKey insights: Reduces multi-variable problems to single-variable problems. Choose substitutions that simplify the most.\\n\\nExample: Used to solve system by expressing y in terms of x, then substituting into second equation."
 }}
 
 **Rules:**
 1. Output ONLY valid JSON - no markdown, no comments, no extra text
-2. Skill names must start with "skill_"
-3. Descriptions must be clear strings (not objects or arrays)
-4. Use double quotes for all strings
-5. No trailing commas
-6. Extract only skills actually used in the solution
+2. Format: {{"skill_name": "description"}} - simple key-value pairs
+3. Description must include: When to use, Step-by-step, Key insights, Example
+4. Use \\n\\n to separate sections in description
+5. Steps must be numbered: 1) 2) 3)
+6. No trailing commas
+7. Extract only skills actually used in the solution
 
 **Output your JSON:**
                 """
@@ -1022,12 +1039,12 @@ if __name__ == "__main__":
         result = None
         if args.single or (args.papers_dir is None and args.num_papers is None):
             result = reader.read_paper(task=args.task)
-            reader.save_reasoning(result)
-            
+        reader.save_reasoning(result)
+
             if result:
-                print("\n" + "=" * 80)
+        print("\n" + "=" * 80)
                 print("SKILL CURATION PIPELINE COMPLETE")
-                print("=" * 80)
+        print("=" * 80)
                 print(f"Solution: {result.get('solution', 'N/A')[:200]}...")
                 print(f"\nSkills Extracted: {len(result.get('skills_extracted', {}))}")
                 print(f"Skills Used: {result.get('skills_used', [])}")
@@ -1058,13 +1075,13 @@ if __name__ == "__main__":
             )
             
             if results:
-                print("\n" + "=" * 80)
+        print("\n" + "=" * 80)
                 print("ALL PAPERS PROCESSED")
                 print("=" * 80)
                 print(f"Total papers processed: {len(results)}")
                 total_skills = sum(len(r.get('behavior_book', {})) for r in results)
                 print(f"Total skills extracted: {total_skills}")
-                print("=" * 80)
+        print("=" * 80)
             else:
                 print("\nNo papers were processed. Check that:")
                 print(f"1. Directory exists: {papers_dir}")
