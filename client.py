@@ -285,7 +285,7 @@ Focus on extracting actionable, procedural knowledge that can be packaged as reu
     def _get_behavior_prompt(self, problem: str, solution: str, reflection: str) -> str:
         """Step 3: Generate skills following Anthropic Skills format - procedural knowledge with instructions"""
         prompt_template = """
-Create reusable skills from the solution below. Skills are procedural knowledge that teach how to complete specific tasks in a repeatable way.
+Extract reusable skills from the solution below. Analyze the solution and reflection to identify concrete, actionable skills that can be applied to similar problems.
 
 Problem: {problem}
 
@@ -293,67 +293,52 @@ Solution: {solution}
 
 Reflection: {reflection}
 
-**What are Skills?**
-Skills are instructions that teach how to complete specific tasks in a repeatable way. They provide:
-- Clear procedures that can be followed step-by-step
-- Guidance on when to use each skill
-- Examples of application
-- Guidelines for effective use
+**Your Task:**
+Identify and extract all reusable skills, techniques, and methods used in the solution. Each skill should be a concrete procedure that can guide someone to solve similar problems.
 
-**Skill Requirements:**
-1. **Actionable**: Provide clear, step-by-step instructions that can be followed
-2. **Concrete**: Include specific, detailed steps - not vague descriptions
-3. **Reusable**: Applicable to similar problems, not just this specific one
-4. **Complete**: Include when to use, how to use, and why it works
-5. **Procedural**: Focus on the process and workflow, not just the outcome
+**What Makes a Good Skill:**
+- A specific technique or method that was used in the solution
+- Something that can be applied to similar problems, not just this one
+- Has clear steps that can be followed
+- Includes guidance on when to use it
 
-**Skill Description Structure:**
-Each skill description must contain:
+**Skill Description Must Include:**
 
-1. **When to use**: Detailed explanation of when to apply this skill, what problem types trigger it, and what conditions must be met. Be comprehensive and specific.
+1. **When to use**: Explain when this skill should be applied. What types of problems? What conditions must be met? What situations trigger this skill?
 
-2. **Step-by-step instructions**: Detailed, numbered, concrete, actionable steps
-   - Format: "1) [detailed specific action] 2) [detailed specific action] 3) [detailed specific action]"
-   - Each step should be clear, executable, and include specific techniques, formulas, or methods
-   - Include decision points, important considerations, and tips
+2. **Step-by-step**: Provide detailed, numbered steps (1) 2) 3) ...) that explain exactly how to apply this skill. Include specific techniques, formulas, methods, or approaches. Be concrete and actionable.
 
+3. **Key insights** (optional): Important considerations, common pitfalls, tips, or why this approach works.
 
+**Output Format (Simple JSON):**
+Output a simple JSON object with skill names as keys and descriptions as string values:
 
-**Output Format:**
-Use a simple, line-based format. Each skill on a separate line:
+{{"skill_name": "description"}}
 
-skill_name: description text here
-
-Format Rules (keep format simple):
-- Each line must start with "skill_" followed by the skill name
-- Use colon (:) to separate skill name from description
-- Description can span multiple lines (continue on next lines without "skill_" prefix)
-- Use semicolons (;) to separate major sections if needed
+Format Rules:
+- Use valid JSON format
+- Each skill name must start with "skill_"
+- Each description is a single string containing: "When to use:" and "Step-by-step:" sections
 - Steps must be numbered: 1) 2) 3)
+- Keep JSON simple - no nested objects, just key-value pairs
+- Escape quotes in descriptions with backslash: \\"
 
-Content Requirements (keep content detailed and comprehensive):
-- Each description MUST include: "When to use:" section with detailed explanation of when to apply this skill, what problem types trigger it, and what conditions must be met
-- Each description MUST include: "Step-by-step:" section with detailed, numbered steps that are concrete, actionable, and include specific techniques, formulas, or methods
-- Each description SHOULD include: Key insights, important considerations, common pitfalls, or tips for effective application
-- Be thorough and detailed in the content - provide complete, actionable instructions that can guide someone through using the skill
+**Example:**
+{{
+  "skill_polynomialFactoring": "When to use: When solving equations with polynomial expressions that can be factored, especially when the polynomial has recognizable patterns like difference of squares (a²-b²), perfect square trinomials (a²±2ab+b²), or common factors. This skill is particularly useful for quadratic and higher-degree polynomial equations where factoring can simplify the problem. Step-by-step: 1) Examine the polynomial structure carefully to identify common patterns such as difference of squares where a²-b²=(a-b)(a+b), perfect square trinomials where a²+2ab+b²=(a+b)² or a²-2ab+b²=(a-b)², and common factors that can be factored out using the distributive property 2) Apply the appropriate factoring technique based on the identified pattern - for difference of squares use (a-b)(a+b), for perfect squares use (a±b)², and for common factors factor out the greatest common divisor 3) Set each factor equal to zero to create simpler equations that are easier to solve, using the zero product property which states that if ab=0 then either a=0 or b=0 4) Solve the resulting linear or quadratic equations using standard algebraic methods such as isolating the variable or applying the quadratic formula if needed 5) Verify all solutions by substituting them back into the original equation to ensure they satisfy the equation and check for extraneous solutions that may have been introduced. Key insights: Factoring reduces complex polynomials to simpler equations. Always look for patterns first before attempting brute force methods.",
+  "skill_systematicSubstitution": "When to use: When dealing with systems of equations or complex expressions with multiple variables where one variable can be expressed in terms of others, making the problem more manageable. This approach is especially effective when one equation is already solved for a variable or can be easily rearranged. Step-by-step: 1) Identify which variable to substitute by finding the simplest relationship - look for equations where one variable is already isolated or can be easily isolated, prefer variables with coefficient 1 or -1 2) Express one variable in terms of others from one equation - solve for the chosen variable explicitly, ensuring the expression is valid for all values in the domain 3) Substitute this expression into other equations in the system, replacing all instances of the substituted variable with the expression, being careful to maintain parentheses when the expression contains multiple terms 4) Simplify the resulting equation(s) to reduce the number of variables and create a more solvable form, combining like terms and applying algebraic operations 5) Solve for the remaining variable(s) using appropriate algebraic techniques such as linear equation solving, quadratic formula, or other methods depending on the equation type 6) Back-substitute to find the values of all variables by plugging the solved values back into the substitution expression, working backwards through the system 7) Verify the solution satisfies all original equations by checking each equation with the found values, ensuring no arithmetic errors were made. Key insights: Substitution reduces multi-variable problems to single-variable problems. Choose the substitution that simplifies the most complex parts first."
+}}
 
-**Example Format (simple format, detailed content):**
-skill_polynomialFactoring: When to use: When solving equations with polynomial expressions that can be factored, especially when the polynomial has recognizable patterns like difference of squares (a²-b²), perfect square trinomials (a²±2ab+b²), or common factors. This skill is particularly useful for quadratic and higher-degree polynomial equations where factoring can simplify the problem. It works best when the polynomial has integer coefficients and recognizable algebraic patterns. Step-by-step: 1) Examine the polynomial structure carefully to identify common patterns such as difference of squares where a²-b²=(a-b)(a+b), perfect square trinomials where a²+2ab+b²=(a+b)² or a²-2ab+b²=(a-b)², and common factors that can be factored out using the distributive property 2) Apply the appropriate factoring technique based on the identified pattern - for difference of squares use (a-b)(a+b), for perfect squares use (a±b)², and for common factors factor out the greatest common divisor 3) Set each factor equal to zero to create simpler equations that are easier to solve, using the zero product property which states that if ab=0 then either a=0 or b=0 4) Solve the resulting linear or quadratic equations using standard algebraic methods such as isolating the variable or applying the quadratic formula if needed 5) Verify all solutions by substituting them back into the original equation to ensure they satisfy the equation and check for extraneous solutions that may have been introduced. Key insights: Factoring reduces complex polynomials to simpler equations. Always look for patterns first before attempting brute force methods. Common patterns include a²-b²=(a-b)(a+b) and x²+2ax+a²=(x+a)². Watch for cases where factoring is not possible - in those cases, use other methods like the quadratic formula.
+**CRITICAL Requirements:**
+1. You MUST extract at least one skill from the solution - analyze the solution carefully
+2. Extract ALL distinct skills, techniques, and methods used in the solution
+3. Each skill must have a "When to use:" section and "Step-by-step:" section in the description
+4. Output ONLY valid JSON - no markdown, no code blocks, no extra text
+5. Escape all double quotes inside descriptions with backslash (\\")
+6. Each skill name must start with "skill_"
+7. Be thorough - if a technique was used, extract it as a skill
 
-skill_systematicSubstitution: When to use: When dealing with systems of equations or complex expressions with multiple variables where one variable can be expressed in terms of others, making the problem more manageable. This approach is especially effective when one equation is already solved for a variable or can be easily rearranged. It works well for linear systems, nonlinear systems where one equation is simpler, and problems involving constraints. The method is particularly useful when one equation has a coefficient of 1 or -1 for a variable, making isolation straightforward. Step-by-step: 1) Identify which variable to substitute by finding the simplest relationship - look for equations where one variable is already isolated or can be easily isolated, prefer variables with coefficient 1 or -1 2) Express one variable in terms of others from one equation - solve for the chosen variable explicitly, ensuring the expression is valid for all values in the domain 3) Substitute this expression into other equations in the system, replacing all instances of the substituted variable with the expression, being careful to maintain parentheses when the expression contains multiple terms 4) Simplify the resulting equation(s) to reduce the number of variables and create a more solvable form, combining like terms and applying algebraic operations 5) Solve for the remaining variable(s) using appropriate algebraic techniques such as linear equation solving, quadratic formula, or other methods depending on the equation type 6) Back-substitute to find the values of all variables by plugging the solved values back into the substitution expression, working backwards through the system 7) Verify the solution satisfies all original equations by checking each equation with the found values, ensuring no arithmetic errors were made. Key insights: Substitution reduces multi-variable problems to single-variable problems. Choose the substitution that simplifies the most complex parts first. Always verify solutions by checking all original equations. Be careful with sign errors during substitution, especially when dealing with negative coefficients.
-
-**CRITICAL Rules:**
-1. Output each skill on a separate line starting with "skill_"
-2. Use format: skill_name: description (description contains all detailed information)
-3. Description must include comprehensive "When to use:" and "Step-by-step:" sections with detailed explanations
-4. Description can continue on following lines (just continue without "skill_" prefix)
-5. Use semicolons (;) to separate major sections if needed, but keep format simple
-6. Steps must be numbered: 1) 2) 3) with detailed, actionable explanations
-7. Only extract skills actually used in the solution
-8. Keep content detailed and comprehensive - simple format, rich content
-9. No JSON, no markdown, no code blocks - just plain text lines
-
-**Output your response as simple text lines (one skill per line, detailed descriptions):**
+**Output your response as a valid JSON object only:**
                 """
         prompt = prompt_template.format(
             problem=problem, solution=solution, reflection=reflection
@@ -409,90 +394,110 @@ skill_systematicSubstitution: When to use: When dealing with systems of equation
         response = self._call_model(prompt, system_prompt, max_new_tokens=32768)
         print(f"Skill Extraction Response: {response}")
 
-        # Simple extraction: parse skills from structured format (similar to MCP function extraction)
+        # Simple JSON extraction: parse skills from JSON format
         skills = {}
         validation_errors = []
         
-        # Method 1: Line-based extraction (primary method)
-        # Look for lines matching: skill_name: description
-        lines = response.split('\n')
-        current_skill = None
-        current_desc = []
-        
-        for line in lines:
-            line = line.strip()
-            if not line:
-                # Empty line - if we have a skill, continue collecting description
-                if current_skill:
-                    continue
-                else:
-                    continue
-            
-            # Check if line starts with a skill name (skill_*:)
-            skill_match = re.match(r'^(skill_\w+)\s*:\s*(.+)$', line)
-            if skill_match:
-                # Save previous skill if exists
-                if current_skill and current_desc:
-                    desc_text = ' '.join(current_desc).strip()
-                    # Normalize whitespace
-                    desc_text = re.sub(r'\s+', ' ', desc_text)
-                    if len(desc_text) >= 20:
-                        skills[current_skill] = desc_text
-                    else:
-                        validation_errors.append(f"Skill '{current_skill}' has too short description")
-                
-                # Start new skill
-                current_skill = skill_match.group(1)
-                current_desc = [skill_match.group(2)]
-            elif current_skill and not line.startswith('skill_'):
-                # Continuation of current skill description (not a new skill)
-                current_desc.append(line)
-            elif not current_skill and line.startswith('skill_'):
-                # Skill without colon - try to extract
-                skill_match = re.match(r'^(skill_\w+)', line)
-                if skill_match:
-                    if current_skill and current_desc:
-                        desc_text = ' '.join(current_desc).strip()
-                        desc_text = re.sub(r'\s+', ' ', desc_text)
-                        if len(desc_text) >= 20:
-                            skills[current_skill] = desc_text
-                    current_skill = skill_match.group(1)
-                    # Try to extract description after skill name
-                    desc_part = line[len(current_skill):].strip()
-                    if desc_part.startswith(':'):
-                        desc_part = desc_part[1:].strip()
-                    current_desc = [desc_part] if desc_part else []
-        
-        # Save last skill
-        if current_skill and current_desc:
-            desc_text = ' '.join(current_desc).strip()
-            desc_text = re.sub(r'\s+', ' ', desc_text)
-            if len(desc_text) >= 20:
-                skills[current_skill] = desc_text
+        try:
+            # Method 1: Extract JSON from markdown code blocks
+            json_code_block = re.search(
+                r"```(?:json)?\s*(\{.*?\})\s*```", response, re.DOTALL
+            )
+            if json_code_block:
+                json_str = json_code_block.group(1)
             else:
-                validation_errors.append(f"Skill '{current_skill}' has too short description")
-        
-        # Method 2: Fallback to JSON extraction if line-based failed
-        if not skills:
-            # Look for JSON object pattern (simple extraction)
-            json_match = re.search(r'\{[^{}]*"skill_\w+"[^{}]*\}', response, re.DOTALL)
-            if json_match:
+                # Method 2: Find JSON object in response
+                start_idx = response.find('{')
+                if start_idx != -1:
+                    # Find matching closing brace
+                    brace_count = 0
+                    in_string = False
+                    escape_next = False
+                    for i in range(start_idx, len(response)):
+                        char = response[i]
+                        if escape_next:
+                            escape_next = False
+                            continue
+                        if char == '\\':
+                            escape_next = True
+                            continue
+                        if char == '"' and not escape_next:
+                            in_string = not in_string
+                            continue
+                        if not in_string:
+                            if char == '{':
+                                brace_count += 1
+                            elif char == '}':
+                                brace_count -= 1
+                                if brace_count == 0:
+                                    json_str = response[start_idx:i+1]
+                                    break
+                    else:
+                        # If no complete match, try last brace
+                        last_brace = response.rfind('}', start_idx)
+                        if last_brace != -1:
+                            json_str = response[start_idx:last_brace+1]
+                        else:
+                            json_str = None
+                else:
+                    json_str = None
+            
+            if json_str:
                 try:
-                    json_str = json_match.group(0)
                     # Simple cleanup
-                    json_str = re.sub(r',\s*}', '}', json_str)
+                    json_str = re.sub(r',\s*}', '}', json_str)  # Remove trailing commas
+                    json_str = re.sub(r',\s*]', ']', json_str)
+                    
+                    # Parse JSON
                     json_data = json.loads(json_str)
+                    
                     if isinstance(json_data, dict):
                         for skill_name, skill_desc in json_data.items():
+                            # Ensure skill name starts with skill_
                             if not skill_name.startswith("skill_"):
                                 skill_name = f"skill_{skill_name}"
-                            if isinstance(skill_desc, str):
-                                skill_desc = skill_desc.strip()
-                                skill_desc = re.sub(r'\s+', ' ', skill_desc)
-                                if len(skill_desc) >= 20:
-                                    skills[skill_name] = skill_desc
-                except Exception as e:
-                    validation_errors.append(f"JSON fallback failed: {e}")
+                            
+                            # Convert to string and normalize
+                            if isinstance(skill_desc, dict):
+                                skill_desc = str(skill_desc)
+                            elif isinstance(skill_desc, list):
+                                skill_desc = " ".join(str(item) for item in skill_desc)
+                            elif not isinstance(skill_desc, str):
+                                skill_desc = str(skill_desc)
+                            
+                            # Normalize whitespace
+                            skill_desc = re.sub(r'\s+', ' ', skill_desc).strip()
+                            
+                            # Validate
+                            if len(skill_desc) >= 20:
+                                skills[skill_name] = skill_desc
+                            else:
+                                validation_errors.append(f"Skill '{skill_name}' has too short description")
+                    
+                except json.JSONDecodeError as e:
+                    print(f"Warning: JSON decode error: {e}")
+                    validation_errors.append(f"JSON parsing error: {e}")
+            
+            # Method 3: Fallback - extract using regex if JSON parsing failed
+            if not skills:
+                print("Warning: JSON parsing failed. Attempting regex extraction.")
+                # Extract skill_name: "description" patterns
+                skill_pattern = r'"skill_\w+"\s*:\s*"((?:[^"\\]|\\.)*)"'
+                name_pattern = r'"skill_\w+"'
+                names = re.findall(name_pattern, response)
+                descriptions = re.findall(skill_pattern, response)
+                
+                for i, name in enumerate(names):
+                    if i < len(descriptions):
+                        skill_name = name.strip('"')
+                        skill_desc = descriptions[i].replace('\\"', '"').replace('\\n', ' ')
+                        skill_desc = re.sub(r'\s+', ' ', skill_desc).strip()
+                        if len(skill_desc) >= 20:
+                            skills[skill_name] = skill_desc
+            
+        except Exception as e:
+            print(f"Warning: Error parsing skills: {e}")
+            validation_errors.append(f"Exception during parsing: {e}")
         
         if not skills:
             validation_errors.append("Could not extract any skills from response")
