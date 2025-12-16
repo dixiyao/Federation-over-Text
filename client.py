@@ -40,33 +40,33 @@ class ChainOfThoughtReader:
             or "Analyze this paper and identify key contributions, limitations, and potential future research directions."
         )
         self.behavior_book = {}  # Store extracted behaviors
-
+        
         # Model and tokenizer will be loaded lazily on first use
         self.model = None
         self.tokenizer = None
         self.device = device or ("cuda" if self._check_cuda() else "cpu")
-
+        
     def _check_cuda(self) -> bool:
         """Check if CUDA is available"""
         try:
             return torch.cuda.is_available()
         except ImportError:
             return False
-
+    
     def _load_model(self):
         """Lazy load the Hugging Face model and tokenizer"""
         if self.model is not None and self.tokenizer is not None:
             return
-
+        
         try:
             print(f"Loading model: {self.model_name}")
             print(f"Device: {self.device}")
-
+            
             # Load tokenizer
             self.tokenizer = AutoTokenizer.from_pretrained(
                 self.model_name, trust_remote_code=True
             )
-
+            
             # Load model
             # Use torch_dtype instead of dtype for from_pretrained
             model_kwargs = {
@@ -82,16 +82,16 @@ class ChainOfThoughtReader:
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.model_name, **model_kwargs
             )
-
+            
             if self.device == "cpu":
                 self.model = self.model.to(self.device)
-
+            
             # Set pad token if not present
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
-
+            
             print("Model loaded successfully!")
-
+            
         except ImportError:
             raise ImportError(
                 "transformers and torch are required. Install with: pip install transformers torch"
@@ -146,28 +146,28 @@ class ChainOfThoughtReader:
     ) -> str:
         """
         Call the Hugging Face language model.
-
+        
         Args:
             prompt: The user prompt
             system_prompt: Optional system prompt (will be prepended if provided)
                           NOTE: For DeepSeek-R1 models, avoid system prompts - put all in user prompt
             max_new_tokens: Maximum number of new tokens to generate. If None, uses default 32768.
-
+        
         Returns:
             Generated text response
         """
         # Load model if not already loaded
         self._load_model()
-
+        
         # For DeepSeek-R1: Avoid system prompts, put all instructions in user prompt
         # If system_prompt is provided, combine it into the user prompt
         if system_prompt:
             full_prompt = f"{system_prompt}\n\n{prompt}"
         else:
             full_prompt = prompt
-
+        
         try:
-
+            
             # Tokenize input
             # For papers with ~80k characters, we need ~20-30k tokens
             # DeepSeek-R1 supports large context windows (64k+ tokens)
@@ -189,7 +189,7 @@ class ChainOfThoughtReader:
             print(
                 f"Input tokens: {input_token_count}, Max new tokens: {max_new_tokens}"
             )
-
+            
             # Generate response
             with torch.no_grad():
                 # Use standard settings for reliable generation
@@ -219,14 +219,14 @@ class ChainOfThoughtReader:
                         repetition_penalty=1.1,
                         pad_token_id=self.tokenizer.eos_token_id,
                     )
-
+            
             # Decode response
             generated_text = self.tokenizer.decode(
                 outputs[0][inputs["input_ids"].shape[1] :], skip_special_tokens=True
             )
-
+            
             return generated_text.strip()
-
+            
         except Exception as e:
             print(f"Error calling model: {e}")
             return f"[Error] Model generation failed: {str(e)}"
@@ -307,50 +307,53 @@ Skills are instructions that teach how to complete specific tasks in a repeatabl
 4. **Complete**: Include when to use, how to use, and why it works
 5. **Procedural**: Focus on the process and workflow, not just the outcome
 
-**Skill Description Structure (all within one string per skill):**
-Each skill description must contain these four sections:
+**Skill Description Structure:**
+Each skill description must contain:
 
-1. **When to use**: Clear conditions for when this skill should be applied (1-2 sentences)
-   - What problem types or situations trigger this skill?
-   - What conditions must be met?
+1. **When to use**: Detailed explanation of when to apply this skill, what problem types trigger it, and what conditions must be met. Be comprehensive and specific.
 
-2. **Step-by-step instructions**: Numbered, concrete, actionable steps
-   - Format: "1) [specific action] 2) [specific action] 3) [specific action]"
-   - Each step should be clear and executable
-   - Include decision points if applicable
+2. **Step-by-step instructions**: Detailed, numbered, concrete, actionable steps
+   - Format: "1) [detailed specific action] 2) [detailed specific action] 3) [detailed specific action]"
+   - Each step should be clear, executable, and include specific techniques, formulas, or methods
+   - Include decision points, important considerations, and tips
+
+
 
 **Output Format:**
-Simple JSON object: {{"skill_name": "description"}}
-- Skill name must start with "skill_"
-- Description is a single string containing all information
-- Use semicolons (;) to separate sections, NOT newlines
-- Use numbered format "1) 2) 3)" for steps (no periods after numbers)
-- Keep descriptions concise and focused - avoid long run-on sentences
+Use a simple, line-based format. Each skill on a separate line:
 
-**Example Format:**
-{{
-  "skill_polynomialFactoring": "When to use: When solving equations with polynomial expressions that can be factored, especially when the polynomial has recognizable patterns like difference of squares or perfect square trinomials. Step-by-step: 1) Examine the polynomial structure to identify common patterns (difference of squares: a²-b², perfect square trinomials: a²±2ab+b², common factors) 2) Apply the appropriate factoring technique based on the identified pattern 3) Set each factor equal to zero to create simpler equations 4) Solve the resulting linear or quadratic equations 5) Verify solutions by substituting back into the original equation",
-  "skill_systematicSubstitution": "When to use: When dealing with systems of equations or complex expressions with multiple variables where one variable can be expressed in terms of others, making the problem more manageable. Step-by-step: 1) Identify which variable to substitute by finding the simplest relationship 2) Express one variable in terms of others from one equation 3) Substitute this expression into other equations in the system 4) Simplify the resulting equation(s) to reduce the number of variables 5) Solve for the remaining variable(s) 6) Back-substitute to find the values of all variables 7) Verify the solution satisfies all original equations."
-}}
+skill_name: description text here
+
+Format Rules (keep format simple):
+- Each line must start with "skill_" followed by the skill name
+- Use colon (:) to separate skill name from description
+- Description can span multiple lines (continue on next lines without "skill_" prefix)
+- Use semicolons (;) to separate major sections if needed
+- Steps must be numbered: 1) 2) 3)
+
+Content Requirements (keep content detailed and comprehensive):
+- Each description MUST include: "When to use:" section with detailed explanation of when to apply this skill, what problem types trigger it, and what conditions must be met
+- Each description MUST include: "Step-by-step:" section with detailed, numbered steps that are concrete, actionable, and include specific techniques, formulas, or methods
+- Each description SHOULD include: Key insights, important considerations, common pitfalls, or tips for effective application
+- Be thorough and detailed in the content - provide complete, actionable instructions that can guide someone through using the skill
+
+**Example Format (simple format, detailed content):**
+skill_polynomialFactoring: When to use: When solving equations with polynomial expressions that can be factored, especially when the polynomial has recognizable patterns like difference of squares (a²-b²), perfect square trinomials (a²±2ab+b²), or common factors. This skill is particularly useful for quadratic and higher-degree polynomial equations where factoring can simplify the problem. It works best when the polynomial has integer coefficients and recognizable algebraic patterns. Step-by-step: 1) Examine the polynomial structure carefully to identify common patterns such as difference of squares where a²-b²=(a-b)(a+b), perfect square trinomials where a²+2ab+b²=(a+b)² or a²-2ab+b²=(a-b)², and common factors that can be factored out using the distributive property 2) Apply the appropriate factoring technique based on the identified pattern - for difference of squares use (a-b)(a+b), for perfect squares use (a±b)², and for common factors factor out the greatest common divisor 3) Set each factor equal to zero to create simpler equations that are easier to solve, using the zero product property which states that if ab=0 then either a=0 or b=0 4) Solve the resulting linear or quadratic equations using standard algebraic methods such as isolating the variable or applying the quadratic formula if needed 5) Verify all solutions by substituting them back into the original equation to ensure they satisfy the equation and check for extraneous solutions that may have been introduced. Key insights: Factoring reduces complex polynomials to simpler equations. Always look for patterns first before attempting brute force methods. Common patterns include a²-b²=(a-b)(a+b) and x²+2ax+a²=(x+a)². Watch for cases where factoring is not possible - in those cases, use other methods like the quadratic formula.
+
+skill_systematicSubstitution: When to use: When dealing with systems of equations or complex expressions with multiple variables where one variable can be expressed in terms of others, making the problem more manageable. This approach is especially effective when one equation is already solved for a variable or can be easily rearranged. It works well for linear systems, nonlinear systems where one equation is simpler, and problems involving constraints. The method is particularly useful when one equation has a coefficient of 1 or -1 for a variable, making isolation straightforward. Step-by-step: 1) Identify which variable to substitute by finding the simplest relationship - look for equations where one variable is already isolated or can be easily isolated, prefer variables with coefficient 1 or -1 2) Express one variable in terms of others from one equation - solve for the chosen variable explicitly, ensuring the expression is valid for all values in the domain 3) Substitute this expression into other equations in the system, replacing all instances of the substituted variable with the expression, being careful to maintain parentheses when the expression contains multiple terms 4) Simplify the resulting equation(s) to reduce the number of variables and create a more solvable form, combining like terms and applying algebraic operations 5) Solve for the remaining variable(s) using appropriate algebraic techniques such as linear equation solving, quadratic formula, or other methods depending on the equation type 6) Back-substitute to find the values of all variables by plugging the solved values back into the substitution expression, working backwards through the system 7) Verify the solution satisfies all original equations by checking each equation with the found values, ensuring no arithmetic errors were made. Key insights: Substitution reduces multi-variable problems to single-variable problems. Choose the substitution that simplifies the most complex parts first. Always verify solutions by checking all original equations. Be careful with sign errors during substitution, especially when dealing with negative coefficients.
 
 **CRITICAL Rules:**
-1. Output ONLY valid JSON - no markdown code blocks, no comments, no extra text before or after
-2. Each skill name MUST start with "skill_"
-3. Each skill value MUST be a single string (NOT an object or array)
-4. Use semicolons (;) to separate sections within the description string, NOT newlines or \\n
-5. Steps must be numbered: 1) 2) 3) (no periods after numbers)
-6. Only extract skills that are actually present and used in the solution
-7. Each skill must have concrete, actionable steps
-8. Keep descriptions concise - avoid listing every possible application or creating extremely long descriptions
-9. Ensure all JSON keys and string values are properly quoted with double quotes
-10. Escape all double quotes inside string values with backslash: \\"
-11. Do not include trailing commas
-12. DO NOT use nested objects - everything must be in a single string value
-13. Focus on the core skill and its essential steps - be specific but not exhaustive
-14. If a description contains quotes, escape them properly: use \\" instead of "
-15. Keep each skill description on a single line in the JSON (no actual line breaks)
+1. Output each skill on a separate line starting with "skill_"
+2. Use format: skill_name: description (description contains all detailed information)
+3. Description must include comprehensive "When to use:" and "Step-by-step:" sections with detailed explanations
+4. Description can continue on following lines (just continue without "skill_" prefix)
+5. Use semicolons (;) to separate major sections if needed, but keep format simple
+6. Steps must be numbered: 1) 2) 3) with detailed, actionable explanations
+7. Only extract skills actually used in the solution
+8. Keep content detailed and comprehensive - simple format, rich content
+9. No JSON, no markdown, no code blocks - just plain text lines
 
-**Output your response as a valid JSON object only (no markdown, no code blocks):**
+**Output your response as simple text lines (one skill per line, detailed descriptions):**
                 """
         prompt = prompt_template.format(
             problem=problem, solution=solution, reflection=reflection
@@ -406,183 +409,93 @@ Simple JSON object: {{"skill_name": "description"}}
         response = self._call_model(prompt, system_prompt, max_new_tokens=32768)
         print(f"Skill Extraction Response: {response}")
 
-        # Parse skills from response - simple extraction: just name and description
-        # Replace \n\n with ; in descriptions for easier parsing
+        # Simple extraction: parse skills from structured format (similar to MCP function extraction)
         skills = {}
         validation_errors = []
-
-        try:
-            # Extract JSON object from response
-            json_str = None
-
-            # Try to extract JSON from markdown code blocks
-            json_code_block = re.search(
-                r"```(?:json)?\s*(\{.*?\})\s*```", response, re.DOTALL
-            )
-            if json_code_block:
-                json_str = json_code_block.group(1)
-            else:
-                # Find JSON object using brace counting
-                brace_count = 0
-                start_idx = response.find("{")
-                if start_idx != -1:
-                    in_string = False
-                    escape_next = False
-                    for i in range(start_idx, len(response)):
-                        char = response[i]
-                        if escape_next:
-                            escape_next = False
-                            continue
-                        if char == "\\":
-                            escape_next = True
-                            continue
-                        if char == '"' and not escape_next:
-                            in_string = not in_string
-                            continue
-                        if not in_string:
-                            if char == "{":
-                                brace_count += 1
-                            elif char == "}":
-                                brace_count -= 1
-                                if brace_count == 0:
-                                    json_str = response[start_idx : i + 1]
-                                    break
+        
+        # Method 1: Line-based extraction (primary method)
+        # Look for lines matching: skill_name: description
+        lines = response.split('\n')
+        current_skill = None
+        current_desc = []
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                # Empty line - if we have a skill, continue collecting description
+                if current_skill:
+                    continue
+                else:
+                    continue
+            
+            # Check if line starts with a skill name (skill_*:)
+            skill_match = re.match(r'^(skill_\w+)\s*:\s*(.+)$', line)
+            if skill_match:
+                # Save previous skill if exists
+                if current_skill and current_desc:
+                    desc_text = ' '.join(current_desc).strip()
+                    # Normalize whitespace
+                    desc_text = re.sub(r'\s+', ' ', desc_text)
+                    if len(desc_text) >= 20:
+                        skills[current_skill] = desc_text
                     else:
-                        # If incomplete, try to find last complete brace
-                        last_brace = response.rfind("}", start_idx)
-                        if last_brace != -1:
-                            json_str = response[start_idx : last_brace + 1]
-
-            if json_str:
+                        validation_errors.append(f"Skill '{current_skill}' has too short description")
+                
+                # Start new skill
+                current_skill = skill_match.group(1)
+                current_desc = [skill_match.group(2)]
+            elif current_skill and not line.startswith('skill_'):
+                # Continuation of current skill description (not a new skill)
+                current_desc.append(line)
+            elif not current_skill and line.startswith('skill_'):
+                # Skill without colon - try to extract
+                skill_match = re.match(r'^(skill_\w+)', line)
+                if skill_match:
+                    if current_skill and current_desc:
+                        desc_text = ' '.join(current_desc).strip()
+                        desc_text = re.sub(r'\s+', ' ', desc_text)
+                        if len(desc_text) >= 20:
+                            skills[current_skill] = desc_text
+                    current_skill = skill_match.group(1)
+                    # Try to extract description after skill name
+                    desc_part = line[len(current_skill):].strip()
+                    if desc_part.startswith(':'):
+                        desc_part = desc_part[1:].strip()
+                    current_desc = [desc_part] if desc_part else []
+        
+        # Save last skill
+        if current_skill and current_desc:
+            desc_text = ' '.join(current_desc).strip()
+            desc_text = re.sub(r'\s+', ' ', desc_text)
+            if len(desc_text) >= 20:
+                skills[current_skill] = desc_text
+            else:
+                validation_errors.append(f"Skill '{current_skill}' has too short description")
+        
+        # Method 2: Fallback to JSON extraction if line-based failed
+        if not skills:
+            # Look for JSON object pattern (simple extraction)
+            json_match = re.search(r'\{[^{}]*"skill_\w+"[^{}]*\}', response, re.DOTALL)
+            if json_match:
                 try:
-                    # Clean up JSON: remove comments and trailing commas
-                    json_str = re.sub(r"^\s*//.*?$", "", json_str, flags=re.MULTILINE)
-                    json_str = re.sub(r"//.*?(?=\n|$)", "", json_str)
-                    json_str = re.sub(r"/\*.*?\*/", "", json_str, flags=re.DOTALL)
-                    json_str = re.sub(r",\s*}", "}", json_str)
-                    json_str = re.sub(r",\s*]", "]", json_str)
-
-                    # Remove trailing text after last brace
-                    last_brace = json_str.rfind("}")
-                    if last_brace != -1:
-                        text_after = json_str[last_brace + 1 :].strip()
-                        if text_after and not text_after.startswith("}"):
-                            json_str = json_str[: last_brace + 1]
-
-                    # Try parsing
-                    try:
-                        json_data = json.loads(json_str)
-                    except json.JSONDecodeError as e:
-                        # Fix trailing commas more aggressively
-                        for _ in range(5):
-                            json_str = re.sub(r",(\s*[}\]])", r"\1", json_str)
-                        json_str = re.sub(r"'([^']*)':", r'"\1":', json_str)
-                        json_str = re.sub(r":\s*'([^']*)'", r': "\1"', json_str)
-                        
-                        # Try to fix unescaped quotes in string values
-                        # Use a more robust approach: extract skills using regex if JSON parsing fails
-                        try:
-                            json_data = json.loads(json_str)
-                        except json.JSONDecodeError:
-                            # Last resort: extract using regex pattern matching
-                            # This handles cases where JSON has unescaped quotes or other issues
-                            skill_pattern = r'"skill_\w+"\s*:\s*"((?:[^"\\]|\\.)*)"'
-                            name_pattern = r'"skill_\w+"'
-                            names = re.findall(name_pattern, json_str)
-                            # Try to extract descriptions more carefully
-                            descriptions = []
-                            # Find all skill definitions and extract their values
-                            for match in re.finditer(r'"skill_\w+"\s*:\s*"', json_str):
-                                start = match.end()
-                                # Find the matching closing quote, handling escaped quotes
-                                end = start
-                                while end < len(json_str):
-                                    if json_str[end] == '\\' and end + 1 < len(json_str):
-                                        end += 2
-                                        continue
-                                    if json_str[end] == '"':
-                                        # Check if this is followed by comma or closing brace
-                                        next_char = json_str[end + 1 : end + 2].strip() if end + 1 < len(json_str) else ''
-                                        if next_char in [',', '}', '']:
-                                            descriptions.append(json_str[start:end])
-                                            break
-                                    end += 1
-                            
-                            if names and descriptions and len(names) == len(descriptions):
-                                json_data = {}
-                                for i, name in enumerate(names):
-                                    if i < len(descriptions):
-                                        skill_name = name.strip('"')
-                                        skill_desc = descriptions[i].replace('\\"', '"').replace('\\n', ' ')
-                                        json_data[skill_name] = skill_desc
-                            else:
-                                raise e
-
-                    # Extract skills: simple key-value pairs
+                    json_str = json_match.group(0)
+                    # Simple cleanup
+                    json_str = re.sub(r',\s*}', '}', json_str)
+                    json_data = json.loads(json_str)
                     if isinstance(json_data, dict):
                         for skill_name, skill_desc in json_data.items():
-                            # Ensure skill name starts with skill_
                             if not skill_name.startswith("skill_"):
                                 skill_name = f"skill_{skill_name}"
-
-                            # Convert description to string
-                            if isinstance(skill_desc, dict):
-                                skill_desc = str(skill_desc)
-                            elif isinstance(skill_desc, list):
-                                skill_desc = " ".join(str(item) for item in skill_desc)
-                            elif not isinstance(skill_desc, str):
-                                skill_desc = str(skill_desc)
-
-                            # Replace \n\n with ; and normalize whitespace
-                            skill_desc = (
-                                skill_desc.replace("\\n\\n", "; ")
-                                .replace("\\n", " ")
-                                .replace("\n\n", "; ")
-                                .replace("\n", " ")
-                            )
-                            skill_desc = re.sub(r"\s+", " ", skill_desc).strip()
-
-                            # Validate: must have minimum length
-                            if len(skill_desc) >= 20:
-                                skills[skill_name] = skill_desc
-                            else:
-                                validation_errors.append(
-                                    f"Skill '{skill_name}' has too short description"
-                                )
-
-                except json.JSONDecodeError as e:
-                    print(f"Warning: JSON decode error: {e}")
-                    validation_errors.append(f"JSON parsing error: {e}")
-
-            # If still no skills, try regex extraction
-            if not skills:
-                print("Warning: Could not parse JSON. Attempting regex extraction.")
-                # Extract skill_name: "description" patterns
-                skill_pattern = r'"skill_\w+"\s*:\s*"([^"]*(?:\\.[^"]*)*)"'
-                name_pattern = r'"skill_\w+"'
-                names = re.findall(name_pattern, response)
-                descriptions = re.findall(skill_pattern, response)
-
-                for i, name in enumerate(names):
-                    if i < len(descriptions):
-                        skill_name = name.strip('"')
-                        skill_desc = (
-                            descriptions[i].replace("\\n", " ").replace('\\"', '"')
-                        )
-                        # Replace \n\n with ;
-                        skill_desc = skill_desc.replace("\n\n", "; ").replace("\n", " ")
-                        skill_desc = re.sub(r"\s+", " ", skill_desc).strip()
-                        if len(skill_desc) >= 20:
-                            skills[skill_name] = skill_desc
-
-                if not skills:
-                    validation_errors.append(
-                        "Could not extract any skills from response"
-                    )
-
-        except Exception as e:
-            print(f"Warning: Error parsing skills: {e}")
-            validation_errors.append(f"Exception during parsing: {e}")
+                            if isinstance(skill_desc, str):
+                                skill_desc = skill_desc.strip()
+                                skill_desc = re.sub(r'\s+', ' ', skill_desc)
+                                if len(skill_desc) >= 20:
+                                    skills[skill_name] = skill_desc
+                except Exception as e:
+                    validation_errors.append(f"JSON fallback failed: {e}")
+        
+        if not skills:
+            validation_errors.append("Could not extract any skills from response")
 
         # Filter valid skills
         valid_skills = {}
@@ -944,7 +857,7 @@ if __name__ == "__main__":
 
     # Example usage
     reader = ChainOfThoughtReader(
-        model_name=args.model,
+        model_name=args.model, 
         task=args.task,
         device=args.device,
         papers_dir=args.papers_dir,
