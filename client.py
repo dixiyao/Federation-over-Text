@@ -234,9 +234,10 @@ Problem: {problem}"""
         return prompt
 
     def _get_reflection_prompt(self, problem: str, solution: str) -> str:
-        """Step 2: Extract insights and learnings from the solution"""
+        """Step 2: Extract procedural knowledge and reusable patterns for skill creation"""
         prompt = f"""
-You are analyzing a step-by-step solution to extract key insights and learnings.
+Analyze the solution below to extract procedural knowledge that can be turned into reusable skills. 
+Skills are instructions that teach how to complete specific tasks in a repeatable way.
 
 Problem:
 {problem}
@@ -244,42 +245,42 @@ Problem:
 Step-by-Step Solution:
 {solution}
 
-Your task: Extract insights, learnings, and key reasoning patterns from the solution. Focus on:
-1. **What was learned**: What concepts, techniques, or strategies were used?
-2. **How it was applied**: What were the concrete steps and reasoning patterns?
-3. **Why it worked**: What insights made this approach effective?
-4. **Generalizable patterns**: What can be reused for similar problems?
+Your task: Extract procedural knowledge and reusable patterns that can be packaged as skills. Focus on:
 
-Output format (structured analysis):
+1. **Procedural Patterns**: What step-by-step procedures were used? How can these be repeated?
+2. **Decision Points**: What conditions determined which approach to use? When should each technique apply?
+3. **Reusable Techniques**: What methods, strategies, or workflows can be applied to similar problems?
+4. **Key Insights**: What made this approach effective? What should someone know to use it correctly?
+5. **Applicability**: What types of problems would benefit from these techniques?
 
-### I. Key Insights and Learnings
-- List the main insights gained from solving this problem
-- Identify the core reasoning patterns used
-- Note any "aha moments" or critical realizations
+Output your analysis covering:
 
-### II. Step-by-Step Reasoning Analysis
-- Break down the solution into logical reasoning steps
-- For each major step, explain:
-  * What technique or approach was used
-  * Why this step was necessary
-  * How it connects to the overall solution
+### I. Procedural Knowledge
+- Break down the solution into clear, repeatable procedures
+- Identify the sequence of steps that led to success
+- Note any decision-making criteria or conditions
 
-### III. Extractable Skills and Techniques
-- Identify reusable methods, strategies, or techniques from the solution
-- For each technique:
-  * Name it clearly
-  * Describe when and how it was applied
-  * Explain why it was effective
-  * Note what types of problems it could help solve
+### II. Reusable Techniques and Methods
+- List specific techniques, strategies, or workflows used
+- For each technique, identify:
+  * When it should be used (conditions/triggers)
+  * How it was applied (concrete steps)
+  * Why it was effective (insights)
+  * What problems it could solve (applicability)
 
-Focus on extracting actionable knowledge that can guide future problem-solving.
+### III. Critical Insights and Guidelines
+- What key insights made this solution work?
+- What common pitfalls should be avoided?
+- What variations or edge cases should be considered?
+
+Focus on extracting actionable, procedural knowledge that can be packaged as reusable skills for similar problems.
 """
         return prompt
 
     def _get_behavior_prompt(self, problem: str, solution: str, reflection: str) -> str:
-        """Step 3: Generate actionable skills with concrete steps and instructions"""
+        """Step 3: Generate skills following Anthropic Skills format - procedural knowledge with instructions"""
         prompt_template = """
-Extract reusable skills from the solution below. Output simple JSON format: skill_name: skill_description
+Create reusable skills from the solution below. Skills are procedural knowledge that teach how to complete specific tasks in a repeatable way.
 
 Problem: {problem}
 
@@ -287,41 +288,68 @@ Solution: {solution}
 
 Reflection: {reflection}
 
-**Skill Requirements:**
-1. Each skill must be **actionable** - provide clear, step-by-step instructions
-2. Each skill must include **concrete steps** - not vague descriptions
-3. Each skill must include **insights** - explain why and when to use it
-4. Each skill must be **reusable** - applicable to similar problems, not just this one
-5. Skills should be formatted like agent skills: clear instructions that guide step-by-step reasoning
+**What are Skills?**
+Skills are instructions that teach how to complete specific tasks in a repeatable way. They provide:
+- Clear procedures that can be followed step-by-step
+- Guidance on when to use each skill
+- Examples of application
+- Guidelines for effective use
 
-**Skill Description Must Include (all within the description string):**
-Each skill description should contain:
-1. **When to use**: Under what conditions this skill applies (1-2 sentences)
-2. **Step-by-step**: Numbered list of concrete, actionable steps (format: "1) [step] 2) [step] 3) [step]")
-3. **Key insights**: Why this approach works and what to watch for (1-2 sentences)
-4. **Example**: Brief note on how it was used in this problem (1 sentence)
+**Skill Requirements:**
+1. **Actionable**: Provide clear, step-by-step instructions that can be followed
+2. **Concrete**: Include specific, detailed steps - not vague descriptions
+3. **Reusable**: Applicable to similar problems, not just this specific one
+4. **Complete**: Include when to use, how to use, and why it works
+5. **Procedural**: Focus on the process and workflow, not just the outcome
+
+**Skill Description Structure (all within one string per skill):**
+Each skill description must contain these four sections:
+
+1. **When to use**: Clear conditions for when this skill should be applied (1-2 sentences)
+   - What problem types or situations trigger this skill?
+   - What conditions must be met?
+
+2. **Step-by-step instructions**: Numbered, concrete, actionable steps
+   - Format: "1) [specific action] 2) [specific action] 3) [specific action]"
+   - Each step should be clear and executable
+   - Include decision points if applicable
+
+3. **Key insights and guidelines**: Why this approach works and important considerations
+   - What makes this technique effective?
+   - What should be watched for or avoided?
+   - Any important nuances or edge cases?
+
+4. **Example application**: How this skill was used in the current problem
+   - Brief, concrete example from the solution
+   - Shows the skill in action
 
 **Output Format:**
 Simple JSON object: {{"skill_name": "description"}}
 - Skill name must start with "skill_"
-- Use numbered format "1) 2) 3)" for steps
+- Description is a single string with all four sections
+- Use \\n\\n to separate sections
+- Use numbered format "1) 2) 3)" for steps (no periods after numbers)
 
-**Example:**
+**Example Format:**
 {{
-  "skill_polynomialFactoring": "When to use: When solving equations with polynomial expressions that can be factored.\\n\\nStep-by-step: 1) Identify common factors or patterns (difference of squares, perfect square trinomials, etc.) 2) Apply appropriate factoring technique 3) Set each factor equal to zero 4) Solve resulting equations\\n\\nKey insights: Factoring reduces complex polynomials to simpler linear/quadratic equations. Look for patterns like a²-b²=(a-b)(a+b).\\n\\nExample: Used to factor x²-9=(x-3)(x+3) in quadratic equation solving.",
-  "skill_systematicSubstitution": "When to use: When dealing with systems of equations or complex expressions with multiple variables.\\n\\nStep-by-step: 1) Identify which variable to substitute 2) Express one variable in terms of others from one equation 3) Substitute into other equations 4) Simplify and solve 5) Back-substitute to find remaining variables\\n\\nKey insights: Reduces multi-variable problems to single-variable problems. Choose substitutions that simplify the most.\\n\\nExample: Used to solve system by expressing y in terms of x, then substituting into second equation."
+  "skill_polynomialFactoring": "When to use: When solving equations with polynomial expressions that can be factored, especially when the polynomial has recognizable patterns like difference of squares or perfect square trinomials.\\n\\nStep-by-step: 1) Examine the polynomial structure to identify common patterns (difference of squares: a²-b², perfect square trinomials: a²±2ab+b², common factors) 2) Apply the appropriate factoring technique based on the identified pattern 3) Set each factor equal to zero to create simpler equations 4) Solve the resulting linear or quadratic equations 5) Verify solutions by substituting back into the original equation\\n\\nKey insights: Factoring reduces complex polynomials to simpler equations that are easier to solve. Always look for patterns first before attempting brute force methods. Common patterns include a²-b²=(a-b)(a+b) and x²+2ax+a²=(x+a)². Watch for cases where factoring is not possible - in those cases, use other methods like the quadratic formula.\\n\\nExample: Used to factor x²-9=(x-3)(x+3) in the equation x²-9=0, which simplified to solving x-3=0 and x+3=0.",
+  "skill_systematicSubstitution": "When to use: When dealing with systems of equations or complex expressions with multiple variables where one variable can be expressed in terms of others, making the problem more manageable.\\n\\nStep-by-step: 1) Identify which variable to substitute by finding the simplest relationship 2) Express one variable in terms of others from one equation 3) Substitute this expression into other equations in the system 4) Simplify the resulting equation(s) to reduce the number of variables 5) Solve for the remaining variable(s) 6) Back-substitute to find the values of all variables 7) Verify the solution satisfies all original equations\\n\\nKey insights: Substitution reduces multi-variable problems to single-variable problems, making them easier to solve. Choose the substitution that simplifies the most complex parts first. Always verify solutions by checking all original equations. Be careful with sign errors during substitution.\\n\\nExample: Used to solve the system by expressing y=2x+1 from the first equation, then substituting into the second equation 3x+2(2x+1)=7 to get 7x+2=7, solving for x=5/7, then back-substituting to find y."
 }}
 
-**Rules:**
-1. Output ONLY valid JSON - no markdown, no comments, no extra text
-2. Format: {{"skill_name": "description"}} - simple key-value pairs
-3. Description must include: When to use, Step-by-step, Key insights, Example
-4. Use \\n\\n to separate sections in description
-5. Steps must be numbered: 1) 2) 3)
-6. No trailing commas
-7. Extract only skills actually used in the solution
+**CRITICAL Rules:**
+1. Output ONLY valid JSON - no markdown code blocks, no comments, no extra text before or after
+2. Each skill name MUST start with "skill_"
+3. Each skill value MUST be a single string (NOT an object or array)
+4. Description must include all four sections: When to use, Step-by-step, Key insights, Example
+5. Use \\n\\n to separate sections within the description string
+6. Steps must be numbered: 1) 2) 3) (no periods after numbers)
+7. Only extract skills that are actually present and used in the solution
+8. Each skill must have concrete, actionable steps
+9. Ensure all JSON keys and string values are properly quoted with double quotes
+10. Do not include trailing commas
+11. DO NOT use nested objects - everything must be in a single string value
 
-**Output your JSON:**
+**Output your response as a valid JSON object only (no markdown, no code blocks):**
                 """
         prompt = prompt_template.format(
             problem=problem, solution=solution, reflection=reflection
