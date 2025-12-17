@@ -340,7 +340,6 @@ class SkillAggregationServer:
                 self.embedding_model = SentenceTransformer(
                     self.embedding_model_name,
                     device=embedding_device,
-                    show_progress_bar=False,
                 )
                 print(f"Embedding model device: {embedding_device}")
             print("Embedding model loaded successfully!")
