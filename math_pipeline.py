@@ -10,9 +10,13 @@ with Python's built-in math module.
 import argparse
 import json
 import os
+import random
 import re
 import time
 from typing import Dict, List, Optional
+
+import numpy as np
+import torch
 
 try:
     from datasets import load_dataset
@@ -655,8 +659,26 @@ if __name__ == "__main__":
         action="store_true",
         help="Start from STEP 3 using existing encyclopedia in {output_dir}/encyclopedia.txt (default: math_output/encyclopedia.txt)",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for reproducibility (default: 42)",
+    )
 
     args = parser.parse_args()
+
+    # Fix random seeds for reproducibility
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(args.seed)
+        torch.cuda.manual_seed_all(args.seed)
+        # For reproducibility, set deterministic behavior
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+    print(f"Random seed set to: {args.seed}")
 
     # Use dataset names directly - they will be loaded from Hugging Face
     # Just pass the dataset names, the program will handle downloading
