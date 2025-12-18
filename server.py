@@ -72,7 +72,7 @@ class SkillAggregationServer:
             if not self.gemini_api_key:
                 raise ValueError("Gemini API key is required when use_gemini=True. Set GEMINI_API_KEY env var or pass gemini_api_key parameter.")
             genai.configure(api_key=self.gemini_api_key)
-            self.gemini_model = genai.GenerativeModel('gemini-3-pro')
+            self.gemini_model = genai.GenerativeModel('gemini-3-pro-preview')
 
         # Model and tokenizer will be loaded lazily on first use (only for HuggingFace models)
         self.model = None
