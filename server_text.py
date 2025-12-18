@@ -33,11 +33,9 @@ class TextBasedSkillAggregationServer:
         model_name: str = "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
         device: Optional[str] = None,
         input_dir: str = "math_output",
-        file_prefix: str = "problem_",
     ):
         self.model_name = model_name
         self.input_dir = input_dir
-        self.file_prefix = file_prefix
         self.skill_store = {}  # Aggregated skill store
         self.encyclopedia = ""  # Final encyclopedia
         self.aggregation_steps = []
@@ -767,18 +765,11 @@ if __name__ == "__main__":
         default="math_output",
         help="Output directory for encyclopedia (default: math_output)",
     )
-    parser.add_argument(
-        "--file-prefix",
-        type=str,
-        default="problem_",
-        help="Prefix for skill JSON files to process (default: problem_, can be paper_, etc.)",
-    )
-
     args = parser.parse_args()
 
     # Create server
     server = TextBasedSkillAggregationServer(
-        model_name=args.model, device=args.device, input_dir=args.input_dir, file_prefix=args.file_prefix
+        model_name=args.model, device=args.device, input_dir=args.input_dir
     )
 
     try:
