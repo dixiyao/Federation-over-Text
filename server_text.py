@@ -565,6 +565,31 @@ Each description must be a single string containing all the following sections, 
   "skill_taylorExpansionApproximation": "When to use: When you need to approximate complex functions, analyze local behavior, or simplify nonlinear problems. This fundamental technique applies across calculus, physics, engineering, numerical analysis, machine learning, and optimization. Use Taylor expansion when: functions are too complex to work with directly, you need to understand behavior near a point, you want to linearize nonlinear systems, or you need numerical approximations. This skill is essential for understanding derivatives, optimization, differential equations, and function approximation. Step-by-step: 1) Identify the function to expand and the point of expansion - choose the expansion point (often x=0 for Maclaurin series, or a point where the function is well-behaved) based on where you need the approximation to be accurate 2) Calculate derivatives at the expansion point - compute the function value and its derivatives (first, second, third, etc.) at the chosen point, either analytically or numerically 3) Construct the Taylor series - use the formula f(x) = f(a) + f'(a)(x-a) + f''(a)(x-a)²/2! + f'''(a)(x-a)³/3! + ... where a is the expansion point, continuing to the desired order of approximation 4) Determine the order needed - assess how many terms are required based on desired accuracy, convergence properties, and the range of x values you need to approximate 5) Apply the approximation - use the truncated series to approximate the function, solve equations, or analyze behavior, being mindful of the approximation error 6) Estimate error bounds - use the remainder term (Lagrange or integral form) to bound the approximation error and ensure it meets accuracy requirements 7) Verify and refine - check the approximation against known values or higher-order expansions, and refine if necessary. Key insights: Taylor expansion reveals local structure of functions and enables linearization of nonlinear problems. Lower-order terms often capture the most important behavior. This principle underlies calculus, numerical methods, physics (small angle approximations, perturbation theory), machine learning (gradient descent uses first-order Taylor expansion), and engineering (linearization of nonlinear systems). The expansion point choice is critical - expanding around a point where the function is smooth and well-behaved yields better approximations."
 }}
 
+**CRITICAL: Avoid Generic/Fallback Skills**
+DO NOT create skills that are:
+- Overly generic or universal (e.g., "general problem-solving", "systematic approach", "careful analysis")
+- Too abstract without specific techniques or methods
+- Applicable to "any problem" or "all challenges"
+- Lacking concrete, domain-specific techniques
+- Fallback skills that don't provide specific value
+
+**What Makes a Good Skill:**
+- Specific enough to have concrete techniques, formulas, or methods
+- General enough to apply across related domains, but NOT to all domains
+- Has clear, actionable steps with specific techniques
+- Addresses a particular class of problems with identifiable characteristics
+- Provides domain-specific insights or methods that can be transferred
+
+**Examples of BAD skills (DO NOT CREATE):**
+- "skill_fallback": "When to use: For any problem-solving task..." (TOO GENERIC)
+- "skill_generalProblemSolving": "When to use: For all problems..." (TOO GENERIC)
+- "skill_systematicApproach": "When to use: Always..." (TOO GENERIC)
+
+**Examples of GOOD skills:**
+- "skill_transformerArchitecture": Specific neural network architecture with concrete components
+- "skill_taylorExpansionApproximation": Specific mathematical technique with clear formulas
+- "skill_polynomialFactoring": Specific algebraic technique with concrete methods
+
 **Critical Requirements (Based on Research):**
 1. **Output Format**: Must be simple JSON with skill_name: description (exactly like client.py format)
 2. **Description Format**: Must include "When to use:" and "Step-by-step:" sections in the description string (same as client.py)
@@ -573,12 +598,14 @@ Each description must be a single string containing all the following sections, 
 5. **Skill Composition**: Skills should be composable - can be chained together for complex problems (following Generative Skill Chaining)
 6. **Cross-Domain Transfer**: Include cross-domain insights (universal patterns) and in-domain patterns in descriptions
 7. **Reusable Primitives**: Extract reusable skill primitives that can be applied across contexts (object-centric representation)
-8. **Better Skills**: Skills should be more general and fundamental than original skills, but still actionable
+8. **Better Skills**: Skills should be more general and fundamental than original skills, but still actionable and SPECIFIC
 9. **Merge Skills**: Merge similar skills from previous encyclopedia and client skills into better, unified versions
 10. **Preserve Original**: Original skills remain available - general skills should be able to guide/derive them
-11. **Actionable**: Each skill must have detailed, numbered step-by-step instructions
+11. **Actionable**: Each skill must have detailed, numbered step-by-step instructions with SPECIFIC techniques
 12. **Complete**: Include all necessary information in the description string (when to use, steps, insights, example)
 13. **Portable**: Skills should be portable - applicable across different domains and contexts (Anthropic Skills principle)
+14. **Specificity**: Skills must be specific enough to provide concrete value - avoid generic fallback skills
+15. **Domain-Bounded**: Skills should apply to a class of related problems, not "all problems"
 
 **Existing Encyclopedia (if any):**
 {existing_encyclopedia if existing_encyclopedia else "None"}
@@ -741,22 +768,29 @@ Each description must be a single string containing all the following sections, 
         return result
 
     def save_results(self, result: Dict, output_dir: str = "math_output"):
-        """Save the encyclopedia to a text file"""
+        """Save only encyclopedia.json with format {"skill_name": "description"}"""
         os.makedirs(output_dir, exist_ok=True)
-        encyclopedia_path = os.path.join(output_dir, "encyclopedia.txt")
+        encyclopedia_path = os.path.join(output_dir, "encyclopedia.json")
 
-        # Save only the encyclopedia JSON content
-        with open(encyclopedia_path, "w", encoding="utf-8") as f:
-            f.write(self.encyclopedia)
-
-        print(f"Encyclopedia saved to: {encyclopedia_path}")
-
-        # Also save full result as JSON for reference
-        result_path = os.path.join(output_dir, "aggregation_result.json")
-        with open(result_path, "w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2, ensure_ascii=False)
-
-        print(f"Full aggregation result saved to: {result_path}")
+        # Parse encyclopedia JSON string and save as formatted JSON
+        try:
+            encyclopedia_dict = json.loads(self.encyclopedia)
+            with open(encyclopedia_path, "w", encoding="utf-8") as f:
+                json.dump(encyclopedia_dict, f, indent=2, ensure_ascii=False)
+            print(f"Encyclopedia saved to: {encyclopedia_path}")
+        except json.JSONDecodeError:
+            # If not valid JSON, try to extract JSON from the string
+            json_content = self._extract_json_only(self.encyclopedia)
+            if json_content:
+                encyclopedia_dict = json.loads(json_content)
+                with open(encyclopedia_path, "w", encoding="utf-8") as f:
+                    json.dump(encyclopedia_dict, f, indent=2, ensure_ascii=False)
+                print(f"Encyclopedia saved to: {encyclopedia_path}")
+            else:
+                print(f"Warning: Could not parse encyclopedia as JSON. Saving raw content.")
+                with open(encyclopedia_path, "w", encoding="utf-8") as f:
+                    f.write(self.encyclopedia)
+                print(f"Encyclopedia saved to: {encyclopedia_path}")
 
 
 if __name__ == "__main__":

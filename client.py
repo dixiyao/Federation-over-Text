@@ -240,13 +240,13 @@ class ChainOfThoughtReader:
                     # Default settings for other models
                     outputs = self.model.generate(
                         **inputs,
-                        max_new_tokens=max_new_tokens,
+                            max_new_tokens=max_new_tokens,
                         temperature=0.7,
                         do_sample=True,
                         top_p=0.9,
-                        repetition_penalty=1.1,
+                            repetition_penalty=1.1,
                         pad_token_id=self.tokenizer.eos_token_id,
-                    )
+                )
             
             # Decode response
             generated_text = self.tokenizer.decode(
@@ -750,34 +750,16 @@ Please answer the user's question based on the paper content provided above."""
                 result["paper_name"] = paper_name
                 result["paper_index"] = idx
 
-                # Get the formatted JSON array from the behavior extraction step
-                formatted_json = None
-                for step in result.get("reasoning_steps", []):
-                    if step.get("step") == 3 and "formatted_json_array" in step:
-                        formatted_json = step.get("formatted_json_array")
-                        break
-
-                # If no formatted JSON array found, fall back to behavior_book format
-                if formatted_json is None:
-                    formatted_json = [
-                        {"behavior": name.replace("behavior_", ""), "description": desc}
-                        for name, desc in result.get("behavior_book", {}).items()
-                    ]
-
-                # Save JSON
-                output_data = {
-                    "file_number": idx,
-                    "paper_name": paper_name,
-                    "behaviors": formatted_json,
-                }
-
-                output_path = output_dir / f"paper_{idx:02d}.json"
-                with open(output_path, "w", encoding="utf-8") as f:
-                    json.dump(output_data, f, indent=2, ensure_ascii=False)
-
-                print(f"Saved behavior book to: {output_path}")
-                print(f"\nCompleted paper {idx}/{len(pdf_files)}: {paper_name}")
-                print(f"Behaviors extracted: {len(result.get('behavior_book', {}))}")
+                # Save only skill book as simple JSON: {"skill_name": "description"}
+                skill_book = result.get("behavior_book", {})
+                if skill_book:
+                    output_path = output_dir / f"paper_{idx:02d}.json"
+                    with open(output_path, "w", encoding="utf-8") as f:
+                        json.dump(skill_book, f, indent=2, ensure_ascii=False)
+                    print(f"Saved skill book to: {output_path}")
+                    print(f"Skills extracted: {len(skill_book)}")
+                else:
+                    print(f"No skills extracted from {paper_name}")
                 print("-" * 80)
 
                 all_results.append(result)
@@ -789,31 +771,10 @@ Please answer the user's question based on the paper content provided above."""
                 traceback.print_exc()
                 continue
 
-        # Save summary
-        summary = {
-            "total_papers": len(all_results),
-            "papers": [
-                {
-                    "paper_index": r.get("paper_index", 0),
-                    "paper_name": r.get("paper_name", "Unknown"),
-                    "paper_path": r.get("paper_path", ""),
-                    "behavior_book": r.get("behavior_book", {}),
-                }
-                for r in all_results
-            ],
-            "total_behaviors": sum(
-                len(r.get("behavior_book", {})) for r in all_results
-            ),
-        }
-
-        summary_path = output_dir / "summary.json"
-        with open(summary_path, "w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=2, ensure_ascii=False)
-
         print(f"\n{'='*80}")
         print(f"Completed processing {len(all_results)}/{len(pdf_files)} papers")
-        print(f"Total behaviors extracted: {summary['total_behaviors']}")
-        print(f"Summary saved to: {summary_path}")
+        total_skills = sum(len(r.get("behavior_book", {})) for r in all_results)
+        print(f"Total skills extracted: {total_skills}")
         print(f"{'='*80}")
 
         return all_results
@@ -830,48 +791,36 @@ Please answer the user's question based on the paper content provided above."""
         return "\n".join(formatted)
 
     def save_reasoning(self, reasoning_result: Dict, output_path: Optional[str] = None):
-        """Save the complete reasoning process and behavior book to files"""
+        """Save only skill book as simple JSON: {"skill_name": "description"}"""
+        # Ensure output directory exists
+        output_dir = Path(self.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        skill_book = reasoning_result.get("behavior_book", {})
+        if not skill_book:
+            print("No skills to save")
+            return
+        
         if output_path is None:
             # Create a safe filename from the problem/question
             safe_name = re.sub(
                 r"[^\w\s-]", "", reasoning_result.get("problem", "reasoning")[:50]
             )
             safe_name = re.sub(r"[-\s]+", "_", safe_name)
-            output_path = f"reasoning_{safe_name}.txt"
+            output_path = str(output_dir / f"{safe_name}.json")
+        else:
+            # If relative path, make it relative to output_dir
+            if not os.path.isabs(output_path):
+                output_path = str(output_dir / output_path)
+            # Ensure .json extension
+            if not output_path.endswith(".json"):
+                output_path += ".json"
 
+        # Save only skill book as simple JSON
         with open(output_path, "w", encoding="utf-8") as f:
-            f.write(f"Problem/Question: {reasoning_result.get('problem', 'N/A')}\n")
-            f.write(f"\n{'='*80}\n")
-            f.write("BEHAVIOR CURATION PIPELINE RESULTS\n")
-            f.write(f"{'='*80}\n\n")
-            f.write(reasoning_result["complete_reasoning"])
-            f.write(f"\n\n{'='*80}\n")
-            f.write("BEHAVIOR BOOK\n")
-            f.write(f"{'='*80}\n\n")
-            for behavior_name, behavior_desc in reasoning_result.get(
-                "behavior_book", {}
-            ).items():
-                f.write(f"{behavior_name}: {behavior_desc}\n")
+            json.dump(skill_book, f, indent=2, ensure_ascii=False)
 
-        # Also save as JSON for structured access
-        json_path = output_path.replace(".txt", ".json")
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(reasoning_result, f, indent=2, ensure_ascii=False)
-
-        # Save behavior book separately as JSON
-        behavior_book_path = output_path.replace(".txt", "_behavior_book.json")
-        with open(behavior_book_path, "w", encoding="utf-8") as f:
-            json.dump(
-                reasoning_result.get("behavior_book", {}),
-                f,
-                indent=2,
-                ensure_ascii=False,
-            )
-
-        print("\nResults saved to:")
-        print(f"  - {output_path}")
-        print(f"  - {json_path}")
-        print(f"  - {behavior_book_path}")
+        print(f"Saved skill book to: {output_path}")
 
 
 if __name__ == "__main__":
