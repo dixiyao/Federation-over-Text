@@ -33,9 +33,11 @@ class TextBasedSkillAggregationServer:
         model_name: str = "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
         device: Optional[str] = None,
         input_dir: str = "math_output",
+        file_prefix: str = "problem_",
     ):
         self.model_name = model_name
         self.input_dir = input_dir
+        self.file_prefix = file_prefix
         self.skill_store = {}  # Aggregated skill store
         self.encyclopedia = ""  # Final encyclopedia
         self.aggregation_steps = []
@@ -163,11 +165,11 @@ class TextBasedSkillAggregationServer:
         print("Collecting skill books from JSON files...")
 
         if json_files is None:
-            # Scan input_dir for JSON files matching problem_*.json pattern
+            # Scan input_dir for JSON files matching the specified prefix pattern
             json_files = []
             if os.path.exists(self.input_dir):
                 for filename in os.listdir(self.input_dir):
-                    if filename.startswith("problem_") and filename.endswith(".json"):
+                    if filename.startswith(self.file_prefix) and filename.endswith(".json"):
                         json_files.append(os.path.join(self.input_dir, filename))
             json_files.sort()
 
@@ -747,12 +749,18 @@ if __name__ == "__main__":
         default="math_output",
         help="Output directory for encyclopedia (default: math_output)",
     )
+    parser.add_argument(
+        "--file-prefix",
+        type=str,
+        default="problem_",
+        help="Prefix for skill JSON files to process (default: problem_, can be paper_, etc.)",
+    )
 
     args = parser.parse_args()
 
     # Create server
     server = TextBasedSkillAggregationServer(
-        model_name=args.model, device=args.device, input_dir=args.input_dir
+        model_name=args.model, device=args.device, input_dir=args.input_dir, file_prefix=args.file_prefix
     )
 
     try:
