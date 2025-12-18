@@ -159,52 +159,61 @@ class TextBasedSkillAggregationServer:
 
     def collect_skill_books(self, json_files: Optional[List[str]] = None) -> Dict:
         """
-        Step 1: Collect all skill books from JSON files.
-        Same as original server.py - aggregates all skills together.
+        Step 1: Collect skill books from multiple client result JSON files sequentially.
+
+        Args:
+            json_files: List of JSON file paths. If None, scans input_dir for JSON files.
+
+        Returns:
+            Dictionary containing collected skill books and metadata.
         """
-        print("Collecting skill books from JSON files...")
-
         if json_files is None:
-            # Scan input_dir for JSON files matching the specified prefix pattern
-            json_files = []
-            if os.path.exists(self.input_dir):
-                for filename in os.listdir(self.input_dir):
-                    if filename.startswith(self.file_prefix) and filename.endswith(".json"):
-                        json_files.append(os.path.join(self.input_dir, filename))
-            json_files.sort()
+            # Scan input directory for JSON files
+            input_path = Path(self.input_dir)
+            json_files = list(input_path.glob("*.json"))
+            # Filter out non-skill files (metadata, summary, results, etc.)
+            # Only process problem_*.json files (from math_pipeline) or other skill files
+            json_files = [
+                str(f)
+                for f in json_files
+                if "metadata" not in f.name.lower()
+                and "summary" not in f.name.lower()
+                and "results" not in f.name.lower()
+                and "encyclopedia" not in f.name.lower()
+            ]
 
-        if not json_files:
-            print(f"No skill JSON files found in {self.input_dir}")
-            return {
-                "step": 1,
-                "name": "Collect Skill Books",
-                "files_processed": 0,
-                "total_skills_collected": 0,
-                "unique_skills": 0,
-                "skill_store": {},
-            }
+        print(f"Collecting skill books from {len(json_files)} files...")
 
-        all_skills = {}
         collected_books = {}
-        skill_counts = defaultdict(int)
-        total_skills_count = 0
+        all_skills = {}
+        skill_counts = {}  # Track how many times each skill appears
+        total_skills_count = 0  # Total count including duplicates
         problems = []
 
+        # Read JSON files sequentially
         for json_file in json_files:
             try:
                 with open(json_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
 
-                # Extract skill book (handle both "behavior_book" and "skill_book")
-                skill_book = {}
-                skill_book_raw = data.get("behavior_book") or data.get("skill_book")
+                # Extract skill book (client.py uses "behavior_book" key but contains skills)
+                # Handle both dict and list formats
+                skill_book_raw = (
+                    data.get("behavior_book")
+                    or data.get("behaviors")
+                    or data.get("skills")
+                )
 
+                # Convert list format to dict if needed
+                skill_book = {}
                 if isinstance(skill_book_raw, dict):
                     skill_book = skill_book_raw
                 elif isinstance(skill_book_raw, list):
+                    # Convert list of dicts to dict format
                     # Expected format: [{"behavior": "name", "description": "desc"}, ...]
                     for item in skill_book_raw:
                         if isinstance(item, dict):
+                            # Try different key names
                             skill_name = (
                                 item.get("behavior")
                                 or item.get("skill")
@@ -212,6 +221,7 @@ class TextBasedSkillAggregationServer:
                             )
                             skill_desc = item.get("description") or item.get("desc")
                             if skill_name and skill_desc:
+                                # Ensure skill name starts with "skill_" prefix
                                 if not skill_name.startswith("skill_"):
                                     skill_name = f"skill_{skill_name}"
                                 skill_book[skill_name] = skill_desc
@@ -221,32 +231,39 @@ class TextBasedSkillAggregationServer:
                     collected_books[filename] = {
                         "problem": data.get("problem", "Unknown"),
                         "skill_book": skill_book,
+                        "behavior_book": skill_book,  # Keep for compatibility
                         "solution": data.get("solution", ""),
                         "reflection": data.get("reflection", ""),
                     }
 
+                    # Count and aggregate all skills
                     total_skills_count += len(skill_book)
                     for skill_name, skill_desc in skill_book.items():
+                        # Update skill store (keep latest description if duplicate)
                         all_skills[skill_name] = skill_desc
+                        # Count occurrences
                         skill_counts[skill_name] = skill_counts.get(skill_name, 0) + 1
 
                     problems.append(data.get("problem", "Unknown"))
+
                     print(f"  Collected {len(skill_book)} skills from {filename}")
             except Exception as e:
                 print(f"  Warning: Failed to read {json_file}: {e}")
                 continue
 
+        # Create aggregated skill store
         self.skill_store = all_skills
 
         step_result = {
             "step": 1,
             "name": "Collect Skill Books",
             "files_processed": len(collected_books),
-            "total_skills_collected": total_skills_count,
-            "unique_skills": len(all_skills),
-            "skill_counts": dict(skill_counts),
+            "total_skills_collected": total_skills_count,  # Total including duplicates
+            "unique_skills": len(all_skills),  # Unique skill count
+            "skill_counts": skill_counts,  # Count of each skill
             "collected_books": collected_books,
             "skill_store": self.skill_store,
+            "behavior_bookstore": self.skill_store,  # Keep for compatibility
             "problems": problems,
             "timestamp": time.time(),
         }
@@ -257,6 +274,7 @@ class TextBasedSkillAggregationServer:
         )
 
         return step_result
+
 
     def _get_text_profiling_prompt(self, skill_store: Dict) -> str:
         """Step 2: Prompt for text-based profiling of skill relationships
