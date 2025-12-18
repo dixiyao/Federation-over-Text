@@ -878,6 +878,13 @@ if __name__ == "__main__":
         default=None,
         help="Google Gemini API key (or set GEMINI_API_KEY environment variable)",
     )
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=str,
+        default="output",
+        help="Output directory for saving results (default: output)",
+    )
 
     args = parser.parse_args()
 
@@ -889,6 +896,7 @@ if __name__ == "__main__":
         papers_dir=args.papers_dir,
         use_gemini=args.use_gemini,
         gemini_api_key=args.gemini_api_key,
+        output_dir=args.output,
     )
 
     try:
