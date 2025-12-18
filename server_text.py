@@ -21,6 +21,12 @@ from typing import Dict, List, Optional, Set, Tuple
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+try:
+    import google.generativeai as genai
+    HAS_GEMINI = True
+except ImportError:
+    HAS_GEMINI = False
+
 
 class TextBasedSkillAggregationServer:
     """
@@ -33,6 +39,8 @@ class TextBasedSkillAggregationServer:
         model_name: str = "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
         device: Optional[str] = None,
         input_dir: str = "math_output",
+        use_gemini: bool = False,
+        gemini_api_key: Optional[str] = None,
     ):
         self.model_name = model_name
         self.input_dir = input_dir
@@ -41,7 +49,20 @@ class TextBasedSkillAggregationServer:
         self.aggregation_steps = []
         self.skill_relationships = {}  # Text-based profiling of relationships
 
-        # Model and tokenizer will be loaded lazily on first use
+        # Gemini API support
+        self.use_gemini = use_gemini
+        self.gemini_api_key = gemini_api_key or os.getenv("GEMINI_API_KEY")
+        if self.use_gemini:
+            if not HAS_GEMINI:
+                raise ImportError(
+                    "google-generativeai is required for Gemini API. Install with: pip install google-generativeai"
+                )
+            if not self.gemini_api_key:
+                raise ValueError("Gemini API key is required when use_gemini=True. Set GEMINI_API_KEY env var or pass gemini_api_key parameter.")
+            genai.configure(api_key=self.gemini_api_key)
+            self.gemini_model = genai.GenerativeModel('gemini-3-pro')
+
+        # Model and tokenizer will be loaded lazily on first use (only for HuggingFace models)
         self.model = None
         self.tokenizer = None
         self.device = device or ("cuda" if self._check_cuda() else "cpu")
@@ -93,7 +114,12 @@ class TextBasedSkillAggregationServer:
     def _call_model(
         self, prompt: str, system_prompt: Optional[str] = None, max_new_tokens: int = 78632
     ) -> str:
-        """Call the model with a prompt"""
+        """Call the model with a prompt (HuggingFace or Gemini API)"""
+        # Use Gemini API if configured
+        if self.use_gemini:
+            return self._call_gemini(prompt, system_prompt, max_new_tokens)
+        
+        # Otherwise use HuggingFace model
         self._load_model()
 
         try:
@@ -354,7 +380,7 @@ Analyze these skills and build a profiling of their relationships:
         prompt = self._get_text_profiling_prompt(skill_store)
         system_prompt = None
 
-        response = self._call_model(prompt, system_prompt, max_new_tokens=32768)
+        response = self._call_model(prompt, system_prompt, max_new_tokens=92768)
         print(f"Profiling response generated ({len(response)} characters)")
 
         # Extract JSON from response
@@ -765,11 +791,24 @@ if __name__ == "__main__":
         default="math_output",
         help="Output directory for encyclopedia (default: math_output)",
     )
+    parser.add_argument(
+        "--use-gemini",
+        action="store_true",
+        help="Use Google Gemini API instead of HuggingFace model",
+    )
+    parser.add_argument(
+        "--gemini-api-key",
+        type=str,
+        default=None,
+        help="Google Gemini API key (or set GEMINI_API_KEY environment variable)",
+    )
+
     args = parser.parse_args()
 
     # Create server
     server = TextBasedSkillAggregationServer(
-        model_name=args.model, device=args.device, input_dir=args.input_dir
+        model_name=args.model, device=args.device, input_dir=args.input_dir,
+        use_gemini=args.use_gemini, gemini_api_key=args.gemini_api_key
     )
 
     try:

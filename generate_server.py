@@ -21,6 +21,12 @@ try:
 except ImportError:
     HAS_NETWORKX = False
 
+try:
+    import google.generativeai as genai
+    HAS_GEMINI = True
+except ImportError:
+    HAS_GEMINI = False
+
 
 class GenerateServer:
     """
@@ -32,12 +38,27 @@ class GenerateServer:
         model_name: str = "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
         device: Optional[str] = None,
         max_new_tokens: int = 98304,
+        use_gemini: bool = False,
+        gemini_api_key: Optional[str] = None,
     ):
         self.model_name = model_name
         self.encyclopedia = ""
         self.max_new_tokens = max_new_tokens
 
-        # Model and tokenizer will be loaded lazily on first use
+        # Gemini API support
+        self.use_gemini = use_gemini
+        self.gemini_api_key = gemini_api_key or os.getenv("GEMINI_API_KEY")
+        if self.use_gemini:
+            if not HAS_GEMINI:
+                raise ImportError(
+                    "google-generativeai is required for Gemini API. Install with: pip install google-generativeai"
+                )
+            if not self.gemini_api_key:
+                raise ValueError("Gemini API key is required when use_gemini=True. Set GEMINI_API_KEY env var or pass gemini_api_key parameter.")
+            genai.configure(api_key=self.gemini_api_key)
+            self.gemini_model = genai.GenerativeModel('gemini-3-pro')
+
+        # Model and tokenizer will be loaded lazily on first use (only for HuggingFace models)
         self.model = None
         self.tokenizer = None
         self.device = device or ("cuda" if self._check_cuda() else "cpu")
@@ -387,11 +408,16 @@ Based on the relevant skills above, provide a clear and comprehensive answer to 
         if not self.encyclopedia:
             raise ValueError("Encyclopedia not loaded. Call load_encyclopedia() first.")
 
-        # Load model if not already loaded
-        self._load_model()
-
         # Get the prompt (DeepSeek-R1: all instructions in user prompt, no system prompt)
         prompt = self._get_generation_prompt(query, is_math=is_math)
+
+        # Use Gemini API if configured
+        if self.use_gemini:
+            return self._call_gemini(prompt, max_new_tokens)
+
+        # Otherwise use HuggingFace model
+        # Load model if not already loaded
+        self._load_model()
 
         try:
             # Tokenize input
@@ -434,6 +460,33 @@ Based on the relevant skills above, provide a clear and comprehensive answer to 
         except Exception as e:
             print(f"Error generating response: {e}")
             return f"[Error] Generation failed: {str(e)}"
+    
+    def _call_gemini(self, prompt: str, max_new_tokens: Optional[int] = None) -> str:
+        """Call Gemini API"""
+        try:
+            # Use provided max_new_tokens or fall back to instance default
+            max_tokens = (
+                max_new_tokens if max_new_tokens is not None else self.max_new_tokens
+            )
+            
+            # Configure generation parameters
+            generation_config = {
+                "temperature": 0.7,
+                "top_p": 0.9,
+            }
+            if max_tokens:
+                generation_config["max_output_tokens"] = min(max_tokens, 8192)  # Gemini limit
+            
+            # Generate response
+            response = self.gemini_model.generate_content(
+                prompt,
+                generation_config=generation_config
+            )
+            
+            return response.text.strip()
+            
+        except Exception as e:
+            raise RuntimeError(f"Error calling Gemini API: {e}")
 
 
 if __name__ == "__main__":
@@ -481,6 +534,17 @@ if __name__ == "__main__":
         default=98304,
         help="Maximum number of new tokens to generate (default: 98304)",
     )
+    parser.add_argument(
+        "--use-gemini",
+        action="store_true",
+        help="Use Google Gemini API instead of HuggingFace model",
+    )
+    parser.add_argument(
+        "--gemini-api-key",
+        type=str,
+        default=None,
+        help="Google Gemini API key (or set GEMINI_API_KEY environment variable)",
+    )
 
     args = parser.parse_args()
 
@@ -489,6 +553,8 @@ if __name__ == "__main__":
         model_name=args.model,
         device=args.device,
         max_new_tokens=args.max_new_tokens,
+        use_gemini=args.use_gemini,
+        gemini_api_key=args.gemini_api_key,
     )
 
     try:

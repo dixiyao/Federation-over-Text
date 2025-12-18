@@ -50,10 +50,14 @@ class MathPipeline:
         model_name: str = "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
         device: Optional[str] = None,
         output_dir: str = "math_output",
+        use_gemini: bool = False,
+        gemini_api_key: Optional[str] = None,
     ):
         self.model_name = model_name
         self.device = device
         self.output_dir = output_dir
+        self.use_gemini = use_gemini
+        self.gemini_api_key = gemini_api_key
         os.makedirs(output_dir, exist_ok=True)
 
         # Initialize components
@@ -190,6 +194,8 @@ class MathPipeline:
         self.client = ChainOfThoughtReader(
             model_name=self.model_name,
             device=self.device,
+            use_gemini=self.use_gemini,
+            gemini_api_key=self.gemini_api_key,
         )
 
         # Ensure output directory exists (skills will be saved directly here)
@@ -277,6 +283,8 @@ class MathPipeline:
             model_name=self.model_name,
             device=self.device,
             input_dir=skills_dir,
+            use_gemini=self.use_gemini,
+            gemini_api_key=self.gemini_api_key,
         )
 
         # Aggregate skills
@@ -324,6 +332,8 @@ class MathPipeline:
         self.generate_server = GenerateServer(
             model_name=self.model_name,
             device=self.device,
+            use_gemini=self.use_gemini,
+            gemini_api_key=self.gemini_api_key,
         )
 
         # Load encyclopedia (this will automatically load GraphRAG database if available)
@@ -665,6 +675,17 @@ if __name__ == "__main__":
         default=42,
         help="Random seed for reproducibility (default: 42)",
     )
+    parser.add_argument(
+        "--use-gemini",
+        action="store_true",
+        help="Use Google Gemini API instead of HuggingFace model",
+    )
+    parser.add_argument(
+        "--gemini-api-key",
+        type=str,
+        default=None,
+        help="Google Gemini API key (or set GEMINI_API_KEY environment variable)",
+    )
 
     args = parser.parse_args()
 
@@ -690,6 +711,8 @@ if __name__ == "__main__":
         model_name=args.model,
         device=args.device,
         output_dir=args.output_dir,
+        use_gemini=args.use_gemini,
+        gemini_api_key=args.gemini_api_key,
     )
 
     try:

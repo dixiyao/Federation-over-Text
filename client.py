@@ -17,6 +17,12 @@ import PyPDF2
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+try:
+    import google.generativeai as genai
+    HAS_GEMINI = True
+except ImportError:
+    HAS_GEMINI = False
+
 
 class ChainOfThoughtReader:
     """
@@ -31,9 +37,13 @@ class ChainOfThoughtReader:
         task: Optional[str] = None,
         device: Optional[str] = None,
         papers_dir: Optional[str] = None,
+        use_gemini: bool = False,
+        gemini_api_key: Optional[str] = None,
+        output_dir: str = "output",
     ):
         self.model_name = model_name
         self.papers_dir = papers_dir or "data/papers/iclr23_top5"
+        self.output_dir = output_dir
         self.reasoning_steps = []
         self.task = (
             task
@@ -41,7 +51,20 @@ class ChainOfThoughtReader:
         )
         self.behavior_book = {}  # Store extracted behaviors
         
-        # Model and tokenizer will be loaded lazily on first use
+        # Gemini API support
+        self.use_gemini = use_gemini
+        self.gemini_api_key = gemini_api_key or os.getenv("GEMINI_API_KEY")
+        if self.use_gemini:
+            if not HAS_GEMINI:
+                raise ImportError(
+                    "google-generativeai is required for Gemini API. Install with: pip install google-generativeai"
+                )
+            if not self.gemini_api_key:
+                raise ValueError("Gemini API key is required when use_gemini=True. Set GEMINI_API_KEY env var or pass gemini_api_key parameter.")
+            genai.configure(api_key=self.gemini_api_key)
+            self.gemini_model = genai.GenerativeModel('gemini-3-pro')
+        
+        # Model and tokenizer will be loaded lazily on first use (only for HuggingFace models)
         self.model = None
         self.tokenizer = None
         self.device = device or ("cuda" if self._check_cuda() else "cpu")
@@ -145,7 +168,7 @@ class ChainOfThoughtReader:
         max_new_tokens: Optional[int] = None,
     ) -> str:
         """
-        Call the Hugging Face language model.
+        Call the language model (HuggingFace or Gemini API).
         
         Args:
             prompt: The user prompt
@@ -156,6 +179,11 @@ class ChainOfThoughtReader:
         Returns:
             Generated text response
         """
+        # Use Gemini API if configured
+        if self.use_gemini:
+            return self._call_gemini(prompt, system_prompt, max_new_tokens)
+        
+        # Otherwise use HuggingFace model
         # Load model if not already loaded
         self._load_model()
         
@@ -229,6 +257,39 @@ class ChainOfThoughtReader:
             
         except Exception as e:
             print(f"Error calling model: {e}")
+    
+    def _call_gemini(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        max_new_tokens: Optional[int] = None,
+    ) -> str:
+        """Call Gemini API"""
+        try:
+            # Combine system prompt and user prompt
+            if system_prompt:
+                full_prompt = f"{system_prompt}\n\n{prompt}"
+            else:
+                full_prompt = prompt
+            
+            # Configure generation parameters
+            generation_config = {
+                "temperature": 0.7,
+                "top_p": 0.9,
+            }
+            if max_new_tokens:
+                generation_config["max_output_tokens"] = min(max_new_tokens, 8192)  # Gemini limit
+            
+            # Generate response
+            response = self.gemini_model.generate_content(
+                full_prompt,
+                generation_config=generation_config
+            )
+            
+            return response.text.strip()
+            
+        except Exception as e:
+            raise RuntimeError(f"Error calling Gemini API: {e}")
             return f"[Error] Model generation failed: {str(e)}"
 
     def _get_solution_prompt(self, problem: str) -> str:
@@ -658,8 +719,8 @@ Please answer the user's question based on the paper content provided above."""
         print("=" * 80)
 
         all_results = []
-        output_dir = Path("output")
-        output_dir.mkdir(exist_ok=True)
+        output_dir = Path(self.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
 
         # Process papers sequentially
         for idx, pdf_path in enumerate(pdf_files, 1):
@@ -857,6 +918,17 @@ if __name__ == "__main__":
         action="store_true",
         help="Process a single question without papers (legacy mode)",
     )
+    parser.add_argument(
+        "--use-gemini",
+        action="store_true",
+        help="Use Google Gemini API instead of HuggingFace model",
+    )
+    parser.add_argument(
+        "--gemini-api-key",
+        type=str,
+        default=None,
+        help="Google Gemini API key (or set GEMINI_API_KEY environment variable)",
+    )
 
     args = parser.parse_args()
 
@@ -866,6 +938,8 @@ if __name__ == "__main__":
         task=args.task,
         device=args.device,
         papers_dir=args.papers_dir,
+        use_gemini=args.use_gemini,
+        gemini_api_key=args.gemini_api_key,
     )
 
     try:
