@@ -40,10 +40,13 @@ class GenerateServer:
         max_new_tokens: int = 98304,
         use_gemini: bool = False,
         gemini_api_key: Optional[str] = None,
+        mode: str = "normal",
     ):
         self.model_name = model_name
         self.encyclopedia = ""
+        self.encyclopedia_dict = {}  # For text mode (JSON format)
         self.max_new_tokens = max_new_tokens
+        self.mode = mode  # "normal" for GraphRAG, "text" for encyclopedia.json
 
         # Gemini API support
         self.use_gemini = use_gemini
@@ -63,12 +66,15 @@ class GenerateServer:
         self.tokenizer = None
         self.device = device or ("cuda" if self._check_cuda() else "cpu")
 
-        # GraphRAG database
+        # GraphRAG database (only for normal mode)
         self.graphrag_db = None
         self.graphrag_embeddings = None
         self.graphrag_graph = None
         self.embedding_model = None
         self.embedding_model_name = "BAAI/bge-base-en-v1.5"
+        
+        # System prompt for text mode
+        self.system_prompt = "Using the skill set as the help, when necessary please refer to the skills and guide you resolve question."
 
     def _check_cuda(self) -> bool:
         """Check if CUDA is available"""
@@ -123,19 +129,33 @@ class GenerateServer:
             raise RuntimeError(f"Failed to load model {self.model_name}: {e}")
 
     def load_encyclopedia(self, encyclopedia_path: str):
-        """Load the encyclopedia from a file and GraphRAG database if available"""
+        """Load the encyclopedia from a file. Mode determines how it's loaded:
+        - normal mode: Load encyclopedia.txt and GraphRAG database from server.py
+        - text mode: Load encyclopedia.json from server_text.py
+        """
         try:
-            with open(encyclopedia_path, "r", encoding="utf-8") as f:
-                self.encyclopedia = f.read().strip()
-            print(
-                f"Loaded encyclopedia from {encyclopedia_path} ({len(self.encyclopedia)} characters)"
-            )
+            if self.mode == "text":
+                # Text mode: Load encyclopedia.json
+                with open(encyclopedia_path, "r", encoding="utf-8") as f:
+                    self.encyclopedia_dict = json.load(f)
+                # Convert to string format for compatibility
+                self.encyclopedia = json.dumps(self.encyclopedia_dict, indent=2)
+                print(
+                    f"Loaded encyclopedia.json from {encyclopedia_path} ({len(self.encyclopedia_dict)} skills)"
+                )
+            else:
+                # Normal mode: Load encyclopedia.txt and GraphRAG database
+                with open(encyclopedia_path, "r", encoding="utf-8") as f:
+                    self.encyclopedia = f.read().strip()
+                print(
+                    f"Loaded encyclopedia from {encyclopedia_path} ({len(self.encyclopedia)} characters)"
+                )
 
-            # Try to load GraphRAG database from the same directory
-            encyclopedia_dir = os.path.dirname(encyclopedia_path)
-            graphrag_path = os.path.join(encyclopedia_dir, "graphrag_db.json")
-            if os.path.exists(graphrag_path):
-                self._load_graphrag_database(graphrag_path, encyclopedia_dir)
+                # Try to load GraphRAG database from the same directory
+                encyclopedia_dir = os.path.dirname(encyclopedia_path)
+                graphrag_path = os.path.join(encyclopedia_dir, "graphrag_db.json")
+                if os.path.exists(graphrag_path):
+                    self._load_graphrag_database(graphrag_path, encyclopedia_dir)
         except Exception as e:
             raise FileNotFoundError(
                 f"Failed to load encyclopedia from {encyclopedia_path}: {e}"
@@ -316,79 +336,116 @@ class GenerateServer:
 
         return final_skills
 
-    def _get_generation_prompt(self, query: str, is_math: bool = True) -> str:
+    def _get_generation_prompt(self, query: str, is_math: bool = True) -> tuple:
         """
-        Get the prompt for generating an answer using the encyclopedia with GraphRAG retrieval.
-
-        For DeepSeek-R1 models: All instructions must be in the user prompt (no system prompt).
-        For math problems: Include directive to reason step by step and put answer in \\boxed{}.
+        Get the prompt for generating an answer using the encyclopedia.
+        Returns (system_prompt, user_prompt) tuple.
+        
+        For text mode: Uses system prompt with skills.
+        For normal mode: Uses GraphRAG retrieval (no system prompt for DeepSeek-R1).
         """
-        # Use GraphRAG to retrieve relevant skills
-        retrieved_skills = []
-        skills_text = ""
-
-        if self.graphrag_db:
-            retrieved_skills = self._retrieve_skills_rag(query, top_k=10)
-            if retrieved_skills:
-                # Format skills with clear structure
-                skills_list = []
-                for skill in retrieved_skills:
-                    skill_name = skill["skill_name"]
-                    skill_desc = skill["description"]
-                    # Check if skill description is valid
-                    if skill_desc and len(skill_desc.strip()) >= 10:
-                        skills_list.append(f"**{skill_name}**:\n{skill_desc}")
-                    else:
-                        print(
-                            f"Warning: Skipping skill '{skill_name}' - invalid description"
-                        )
-
-                if skills_list:
-                    skills_text = "\n\n".join(skills_list)
-                    skills_section = f"""Relevant Skills to Guide Your Solution:
+        system_prompt = None
+        user_prompt = ""
+        
+        if self.mode == "text":
+            # Text mode: Use system prompt and full encyclopedia.json
+            system_prompt = self.system_prompt
+            
+            # Format skills from encyclopedia.json
+            skills_list = []
+            for skill_name, skill_desc in self.encyclopedia_dict.items():
+                skills_list.append(f"**{skill_name}**:\n{skill_desc}")
+            
+            skills_text = "\n\n".join(skills_list)
+            skills_section = f"""Skills Encyclopedia:
 
 {skills_text}
 
 ---
 """
-                else:
-                    print("Warning: No valid skills retrieved after validation")
-                    skills_section = ""
-            else:
-                print("Warning: GraphRAG retrieval returned no skills")
-                skills_section = ""
-        else:
-            # Fallback to full encyclopedia if GraphRAG not available
-            if self.encyclopedia:
-                skills_section = f"""Skills Encyclopedia:
-{self.encyclopedia}
-
-"""
-            else:
-                skills_section = ""
-                print("Warning: No encyclopedia or GraphRAG database available")
-
-        # Report which skills will be used
-        if retrieved_skills:
-            skill_names_used = [s["skill_name"] for s in retrieved_skills]
-            print(f"Using {len(skill_names_used)} skills: {skill_names_used}")
-
-        # For DeepSeek-R1: all instructions in user prompt, no system prompt
-        if is_math:
-            prompt = f"""{skills_section}Problem: {query}
+            
+            if is_math:
+                user_prompt = f"""{skills_section}Problem: {query}
 
 Please reason step by step using the relevant skills above. Follow the step-by-step instructions in each skill. Put your final answer within \\boxed{{}}.
 
 <think>
 """
-        else:
-            prompt = f"""{skills_section}Query: {query}
+            else:
+                user_prompt = f"""{skills_section}Query: {query}
 
 Based on the relevant skills above, provide a clear and comprehensive answer to the query. Follow the step-by-step instructions in each skill when applicable. Reference specific skills, categories, or techniques when relevant.
 
 <think>
 """
-        return prompt
+        else:
+            # Normal mode: Use GraphRAG retrieval (no system prompt for DeepSeek-R1)
+            retrieved_skills = []
+            skills_text = ""
+
+            if self.graphrag_db:
+                retrieved_skills = self._retrieve_skills_rag(query, top_k=10)
+                if retrieved_skills:
+                    # Format skills with clear structure
+                    skills_list = []
+                    for skill in retrieved_skills:
+                        skill_name = skill["skill_name"]
+                        skill_desc = skill["description"]
+                        # Check if skill description is valid
+                        if skill_desc and len(skill_desc.strip()) >= 10:
+                            skills_list.append(f"**{skill_name}**:\n{skill_desc}")
+                        else:
+                            print(
+                                f"Warning: Skipping skill '{skill_name}' - invalid description"
+                            )
+
+                    if skills_list:
+                        skills_text = "\n\n".join(skills_list)
+                        skills_section = f"""Relevant Skills to Guide Your Solution:
+
+{skills_text}
+
+---
+"""
+                    else:
+                        print("Warning: No valid skills retrieved after validation")
+                        skills_section = ""
+                else:
+                    print("Warning: GraphRAG retrieval returned no skills")
+                    skills_section = ""
+            else:
+                # Fallback to full encyclopedia if GraphRAG not available
+                if self.encyclopedia:
+                    skills_section = f"""Skills Encyclopedia:
+{self.encyclopedia}
+
+"""
+                else:
+                    skills_section = ""
+                    print("Warning: No encyclopedia or GraphRAG database available")
+
+            # Report which skills will be used
+            if retrieved_skills:
+                skill_names_used = [s["skill_name"] for s in retrieved_skills]
+                print(f"Using {len(skill_names_used)} skills: {skill_names_used}")
+
+            # For DeepSeek-R1: all instructions in user prompt, no system prompt
+            if is_math:
+                user_prompt = f"""{skills_section}Problem: {query}
+
+Please reason step by step using the relevant skills above. Follow the step-by-step instructions in each skill. Put your final answer within \\boxed{{}}.
+
+<think>
+"""
+            else:
+                user_prompt = f"""{skills_section}Query: {query}
+
+Based on the relevant skills above, provide a clear and comprehensive answer to the query. Follow the step-by-step instructions in each skill when applicable. Reference specific skills, categories, or techniques when relevant.
+
+<think>
+"""
+        
+        return (system_prompt, user_prompt)
 
     def generate(
         self, query: str, max_new_tokens: Optional[int] = None, is_math: bool = True
@@ -405,24 +462,31 @@ Based on the relevant skills above, provide a clear and comprehensive answer to 
         Returns:
             Generated answer text
         """
-        if not self.encyclopedia:
+        if not self.encyclopedia and not self.encyclopedia_dict:
             raise ValueError("Encyclopedia not loaded. Call load_encyclopedia() first.")
 
-        # Get the prompt (DeepSeek-R1: all instructions in user prompt, no system prompt)
-        prompt = self._get_generation_prompt(query, is_math=is_math)
+        # Get the prompt (returns (system_prompt, user_prompt) tuple)
+        system_prompt, user_prompt = self._get_generation_prompt(query, is_math=is_math)
 
         # Use Gemini API if configured
         if self.use_gemini:
-            return self._call_gemini(prompt, max_new_tokens)
+            return self._call_gemini(user_prompt, system_prompt, max_new_tokens)
 
         # Otherwise use HuggingFace model
         # Load model if not already loaded
         self._load_model()
 
         try:
+            # For text mode with system prompt, combine into user prompt for DeepSeek-R1
+            # For normal mode, system_prompt is None
+            if system_prompt:
+                full_prompt = f"{system_prompt}\n\n{user_prompt}"
+            else:
+                full_prompt = user_prompt
+            
             # Tokenize input
             inputs = self.tokenizer(
-                prompt,
+                full_prompt,
                 return_tensors="pt",
                 truncation=True,
                 max_length=65536,  # Large limit for encyclopedia content
@@ -461,7 +525,7 @@ Based on the relevant skills above, provide a clear and comprehensive answer to 
             print(f"Error generating response: {e}")
             return f"[Error] Generation failed: {str(e)}"
     
-    def _call_gemini(self, prompt: str, max_new_tokens: Optional[int] = None) -> str:
+    def _call_gemini(self, prompt: str, system_prompt: Optional[str] = None, max_new_tokens: Optional[int] = None) -> str:
         """Call Gemini API"""
         try:
             # Use provided max_new_tokens or fall back to instance default
@@ -477,11 +541,18 @@ Based on the relevant skills above, provide a clear and comprehensive answer to 
             if max_tokens:
                 generation_config["max_output_tokens"] = min(max_tokens, 8192)  # Gemini limit
             
-            # Generate response
-            response = self.gemini_model.generate_content(
-                prompt,
-                generation_config=generation_config
-            )
+            # Generate response with system prompt if provided
+            if system_prompt:
+                response = self.gemini_model.generate_content(
+                    prompt,
+                    generation_config=generation_config,
+                    system_instruction=system_prompt
+                )
+            else:
+                response = self.gemini_model.generate_content(
+                    prompt,
+                    generation_config=generation_config
+                )
             
             return response.text.strip()
             
@@ -498,7 +569,7 @@ if __name__ == "__main__":
         "--encyclopedia",
         type=str,
         required=True,
-        help="Path to encyclopedia.txt file",
+        help="Path to encyclopedia file (encyclopedia.txt for normal mode, encyclopedia.json for text mode)",
     )
     parser.add_argument(
         "-q",
@@ -545,6 +616,13 @@ if __name__ == "__main__":
         default=None,
         help="Google Gemini API key (or set GEMINI_API_KEY environment variable)",
     )
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["normal", "text"],
+        default="normal",
+        help="Mode: 'normal' for GraphRAG (server.py output) or 'text' for encyclopedia.json (server_text.py output) (default: normal)",
+    )
 
     args = parser.parse_args()
 
@@ -555,6 +633,7 @@ if __name__ == "__main__":
         max_new_tokens=args.max_new_tokens,
         use_gemini=args.use_gemini,
         gemini_api_key=args.gemini_api_key,
+        mode=args.mode,
     )
 
     try:
