@@ -2,9 +2,6 @@
 Math Problem Solving Pipeline
 Uses client.py to learn skills from dataset1, aggregates with server.py,
 and uses generate_server.py to solve problems in dataset2.
-
-Note: This file is named math_pipeline.py (not math.py) to avoid conflict
-with Python's built-in math module.
 """
 
 import argparse
@@ -27,8 +24,6 @@ from client import ChainOfThoughtReader
 from generate_server import GenerateServer
 from server import SkillAggregationServer
 
-# Dataset mapping from kvpress: (dataset_name, subset, split)
-# Reference: https://github.com/minghui-liu/kvpress/tree/decode/reason
 DATASET_DICT = {
     "gsm8k": ("openai/gsm8k", "main", "test"),
     "gsm8k_train": ("openai/gsm8k", "main", "train"),
@@ -36,7 +31,7 @@ DATASET_DICT = {
     "aime24": ("math-ai/aime24", None, "test"),
     "commonsenseqa": ("tau/commonsense_qa", None, "validation"),
     "math500": ("HuggingFaceH4/MATH-500", None, "test"),
-    "math1000": ("hendrycks/competition_math", None, "test"),  # Will take first 1000
+    "math1000": ("hendrycks/competition_math", None, "test"),
 }
 
 
@@ -60,7 +55,6 @@ class MathPipeline:
         self.gemini_api_key = gemini_api_key
         os.makedirs(output_dir, exist_ok=True)
 
-        # Initialize components
         self.client = None
         self.server = None
         self.generate_server = None
@@ -87,14 +81,11 @@ class MathPipeline:
                 f"Available datasets: {', '.join(DATASET_DICT.keys())}"
             )
 
-        # Load from Hugging Face (exactly like kvpress does)
         print(f"Loading dataset '{dataset_name}' from Hugging Face...")
         dataset_info = DATASET_DICT[dataset_name]
         hf_name = dataset_info[0]
         data_dir = dataset_info[1]
         data_split = dataset_info[2]
-
-        # Load dataset exactly like kvpress: load_dataset(hf_name, data_dir=data_dir, split=data_split)
         if data_dir:
             ds = load_dataset(hf_name, data_dir=data_dir, split=data_split)
         else:
@@ -183,7 +174,6 @@ class MathPipeline:
         print("STEP 1: Learning Skills from Dataset1")
         print("=" * 80)
 
-        # Load dataset1 from Hugging Face
         problems = self.load_math_dataset(dataset1_name)
         if max_problems:
             problems = problems[:max_problems]
@@ -321,7 +311,6 @@ class MathPipeline:
         print("STEP 3: Solving Dataset2 with Learned Skills")
         print("=" * 80)
 
-        # Load dataset2 from Hugging Face
         problems = self.load_math_dataset(dataset2_name)
         if max_problems:
             problems = problems[:max_problems]
@@ -336,15 +325,7 @@ class MathPipeline:
             gemini_api_key=self.gemini_api_key,
         )
 
-        # Load encyclopedia (this will automatically load GraphRAG database if available)
         self.generate_server.load_encyclopedia(encyclopedia_path)
-
-        # Note: GraphRAG is automatically used by generate_server.py
-        # The _get_generation_prompt method in generate_server.py will:
-        # 1. Use GraphRAG to retrieve relevant skills based on the query
-        # 2. Format them appropriately
-        # 3. Include them in the prompt
-        # No need to override it - GraphRAG handles skill retrieval automatically
 
         # Solve each problem
         results = []
@@ -701,8 +682,6 @@ if __name__ == "__main__":
         torch.backends.cudnn.benchmark = False
     print(f"Random seed set to: {args.seed}")
 
-    # Use dataset names directly - they will be loaded from Hugging Face
-    # Just pass the dataset names, the program will handle downloading
     dataset1_name = args.dataset1
     dataset2_name = args.dataset2
 

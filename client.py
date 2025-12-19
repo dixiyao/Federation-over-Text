@@ -173,7 +173,6 @@ class ChainOfThoughtReader:
         Args:
             prompt: The user prompt
             system_prompt: Optional system prompt (will be prepended if provided)
-                          NOTE: For DeepSeek-R1 models, avoid system prompts - put all in user prompt
             max_new_tokens: Maximum number of new tokens to generate. If None, uses default 32768.
         
         Returns:
@@ -240,13 +239,13 @@ class ChainOfThoughtReader:
                     # Default settings for other models
                     outputs = self.model.generate(
                         **inputs,
-                            max_new_tokens=max_new_tokens,
+                        max_new_tokens=max_new_tokens,
                         temperature=0.7,
                         do_sample=True,
                         top_p=0.9,
-                            repetition_penalty=1.1,
+                        repetition_penalty=1.1,
                         pad_token_id=self.tokenizer.eos_token_id,
-                )
+                    )
             
             # Decode response
             generated_text = self.tokenizer.decode(
@@ -506,7 +505,7 @@ Format Rules:
             if json_str:
                 try:
                     # Simple cleanup
-                    json_str = re.sub(r',\s*}', '}', json_str)  # Remove trailing commas
+                    json_str = re.sub(r',\s*}', '}', json_str)
                     json_str = re.sub(r',\s*]', ']', json_str)
                     
                     # Parse JSON
@@ -572,24 +571,16 @@ Format Rules:
                 valid_skills[k] = v
         if not valid_skills:
             print("WARNING: No valid skills extracted from this problem!")
-            # Do not add fallback skill - just report the warning
-            # formatted_json_array will remain empty or as is
 
         # Report validation results
         if validation_errors:
             print(f"Validation warnings ({len(validation_errors)}):")
-            for error in validation_errors[:5]:  # Show first 5 errors
+            for error in validation_errors[:5]:
                 print(f"  - {error}")
 
         print(
             f"Extracted {len(valid_skills)} valid skills: {list(valid_skills.keys())}"
         )
-
-        # Create formatted JSON array for backward compatibility
-        formatted_json_array = [
-            {"skill_name": name, "description": desc}
-            for name, desc in valid_skills.items()
-        ]
 
         step_result = {
             "step": 3,
@@ -598,7 +589,6 @@ Format Rules:
             "response": response,
             "skills": skills,
             "valid_skills": valid_skills,
-            "formatted_json_array": formatted_json_array,
             "validation_errors": validation_errors,
             "timestamp": time.time(),
         }
@@ -648,13 +638,13 @@ Please answer the user's question based on the paper content provided above."""
         print("Step 1: Generating solution...")
         step1 = self._step_solution(problem)
         solution = step1["response"]
-        time.sleep(1)  # Rate limiting
+        time.sleep(1)
 
         # Step 2: Extract Insights and Learnings
         print("Step 2: Extracting insights and learnings from solution...")
         step2 = self._step_reflection(problem, solution)
         reflection = step2["response"]
-        time.sleep(1)  # Rate limiting
+        time.sleep(1)
 
         # Step 3: Skill Extraction
         print("Step 3: Extracting actionable skills...")
@@ -915,7 +905,7 @@ if __name__ == "__main__":
                 print("\n" + "=" * 80)
                 print("SKILL CURATION PIPELINE COMPLETE")
                 print("=" * 80)
-                print(f"Solution: {result.get('solution', 'N/A')[:200]}...")
+                print(f"Solution: {result.get('solution', 'N/A')}")
                 print(f"\nSkills Extracted: {len(result.get('skills_extracted', {}))}")
                 print(f"Skills Used: {result.get('skills_used', [])}")
                 if result.get("validation_errors"):
@@ -926,7 +916,7 @@ if __name__ == "__main__":
                 print("EXTRACTED SKILLS")
                 print("=" * 80)
                 for skill_name, skill_desc in result.get("behavior_book", {}).items():
-                    print(f"\n{skill_name}: {skill_desc[:200]}...")
+                    print(f"\n{skill_name}: {skill_desc}")
                 print("\n" + "=" * 80)
         else:
             # Process multiple papers

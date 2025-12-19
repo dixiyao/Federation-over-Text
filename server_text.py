@@ -180,6 +180,38 @@ class TextBasedSkillAggregationServer:
 
         except Exception as e:
             raise RuntimeError(f"Error calling model: {e}")
+    
+    def _call_gemini(
+        self, prompt: str, system_prompt: Optional[str] = None, max_new_tokens: Optional[int] = None
+    ) -> str:
+        """Call Gemini API"""
+        try:
+            # Combine system prompt and user prompt
+            if system_prompt:
+                full_prompt = f"{system_prompt}\n\n{prompt}"
+            else:
+                full_prompt = prompt
+            
+            # Configure generation parameters
+            generation_config = {
+                "temperature": 0.7,
+                "top_p": 0.9,
+            }
+            if max_new_tokens:
+                generation_config["max_output_tokens"] = min(max_new_tokens, 8192)  # Gemini limit
+            else:
+                generation_config["max_output_tokens"] = 8192  # Default Gemini limit
+            
+            # Generate response
+            response = self.gemini_model.generate_content(
+                full_prompt,
+                generation_config=generation_config
+            )
+            
+            return response.text.strip()
+            
+        except Exception as e:
+            raise RuntimeError(f"Error calling Gemini API: {e}")
 
     def collect_skill_books(self, json_files: Optional[List[str]] = None) -> Dict:
         """
