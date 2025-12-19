@@ -196,7 +196,7 @@ class TextBasedSkillAggregationServer:
             input_path = Path(self.input_dir)
             json_files = list(input_path.glob("*.json"))
             # Filter out non-skill files (metadata, summary, results, etc.)
-            # Only process problem_*.json files (from math_pipeline) or other skill files
+            # Process problem_*.json (from math_pipeline), paper_*.json (from client.py), or other skill files
             json_files = [
                 str(f)
                 for f in json_files
@@ -249,6 +249,16 @@ class TextBasedSkillAggregationServer:
                                 if not skill_name.startswith("skill_"):
                                     skill_name = f"skill_{skill_name}"
                                 skill_book[skill_name] = skill_desc
+                elif isinstance(data, dict) and not skill_book_raw:
+                    # Check if data itself is a skill book (direct format from client.py)
+                    # If all keys start with "skill_" or most keys are strings with descriptions
+                    skill_keys = [k for k in data.keys() if isinstance(k, str) and k.startswith("skill_")]
+                    if len(skill_keys) > 0 and len(skill_keys) >= len(data) * 0.8:
+                        # This is likely a direct skill book dictionary
+                        skill_book = data
+                    elif all(isinstance(v, str) and len(v) > 20 for v in data.values() if isinstance(v, str)):
+                        # All values are strings (likely descriptions), treat as skill book
+                        skill_book = data
 
                 if skill_book:
                     filename = Path(json_file).stem
