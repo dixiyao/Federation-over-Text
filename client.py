@@ -271,25 +271,50 @@ class ChainOfThoughtReader:
             else:
                 full_prompt = prompt
             
-            # Configure generation parameters
-            generation_config = {
-                "temperature": 0.7,
-                "top_p": 0.9,
-            }
+            # Configure generation parameters - use Gemini defaults, only set max_output_tokens
+            generation_config = {}
             if max_new_tokens:
-                generation_config["max_output_tokens"] = min(max_new_tokens, 8192)  # Gemini limit
+                generation_config["max_output_tokens"] = max_new_tokens
             
             # Generate response
-            response = self.gemini_model.generate_content(
-                full_prompt,
-                generation_config=generation_config
-            )
+            if generation_config:
+                response = self.gemini_model.generate_content(
+                    full_prompt,
+                    generation_config=generation_config
+                )
+            else:
+                response = self.gemini_model.generate_content(full_prompt)
             
-            return response.text.strip()
+            # Handle response safely - check for blocked/filtered content
+            if not response.candidates:
+                raise RuntimeError("Gemini API returned no candidates. Response may have been blocked.")
+            
+            candidate = response.candidates[0]
+            if candidate.finish_reason == 2:  # MAX_TOKENS
+                # Hit token limit, but try to get partial text
+                if candidate.content and candidate.content.parts:
+                    text_parts = [part.text for part in candidate.content.parts if hasattr(part, 'text') and part.text]
+                    if text_parts:
+                        return "\n".join(text_parts).strip()
+                raise RuntimeError("Gemini API hit token limit and no text was returned.")
+            elif candidate.finish_reason == 3:  # SAFETY
+                raise RuntimeError("Gemini API blocked the response due to safety filters.")
+            elif candidate.finish_reason == 4:  # RECITATION
+                raise RuntimeError("Gemini API blocked the response due to recitation.")
+            
+            # Try to get text from response
+            try:
+                return response.text.strip()
+            except ValueError as e:
+                # If response.text fails, try to extract from parts manually
+                if candidate.content and candidate.content.parts:
+                    text_parts = [part.text for part in candidate.content.parts if hasattr(part, 'text') and part.text]
+                    if text_parts:
+                        return "\n".join(text_parts).strip()
+                raise RuntimeError(f"Failed to extract text from Gemini response: {e}")
             
         except Exception as e:
             raise RuntimeError(f"Error calling Gemini API: {e}")
-            return f"[Error] Model generation failed: {str(e)}"
 
     def _get_solution_prompt(self, problem: str) -> str:
         """Get the Solution Prompt as defined in the paper"""
