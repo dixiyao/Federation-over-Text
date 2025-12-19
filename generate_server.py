@@ -533,32 +533,25 @@ Based on the relevant skills above, provide a clear and comprehensive answer to 
                 max_new_tokens if max_new_tokens is not None else self.max_new_tokens
             )
             
+            # Combine system prompt and user prompt (Gemini API doesn't support system_instruction parameter)
+            if system_prompt:
+                full_prompt = f"{system_prompt}\n\n{prompt}"
+            else:
+                full_prompt = prompt
+            
             # Configure generation parameters - use Gemini defaults, only set max_output_tokens
             generation_config = {}
             if max_tokens:
                 generation_config["max_output_tokens"] = max_tokens
             
-            # Generate response with system prompt if provided
-            if system_prompt:
-                if generation_config:
-                    response = self.gemini_model.generate_content(
-                        prompt,
-                        generation_config=generation_config,
-                        system_instruction=system_prompt
-                    )
-                else:
-                    response = self.gemini_model.generate_content(
-                        prompt,
-                        system_instruction=system_prompt
-                    )
+            # Generate response
+            if generation_config:
+                response = self.gemini_model.generate_content(
+                    full_prompt,
+                    generation_config=generation_config
+                )
             else:
-                if generation_config:
-                    response = self.gemini_model.generate_content(
-                        prompt,
-                        generation_config=generation_config
-                    )
-                else:
-                    response = self.gemini_model.generate_content(prompt)
+                response = self.gemini_model.generate_content(full_prompt)
             
             # Handle response safely - check for blocked/filtered content
             if not response.candidates:
