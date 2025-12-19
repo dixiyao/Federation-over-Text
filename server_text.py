@@ -562,33 +562,50 @@ You are extracting fundamental knowledge from a collection of problem-solving sk
 **Your Task:**
 You have:
 1. Previous encyclopedia (existing general skills)
-2. All client skills (new specific skills from problem-solving)
+2. All client skills (new specific skills from problem-solving) - {len(skill_store)} skills total
+
+**CRITICAL: Extract Many Fundamental and Cross-Domain Skills**
+
+Your goal is to extract a comprehensive set of fundamental, cross-domain skills that can be derived and applied beyond their original domain. DO NOT over-merge skills.
 
 1. **Knowledge Distillation - Extract Reusable Skill Primitives**:
    Following the principle of creating object-centric, transferable skill primitives:
-   - Identify the core essence of each skill cluster
+   - For EACH skill cluster, extract multiple fundamental skills that capture the core essence and variations
+   - For EACH domain area, extract cross-domain skills that can be applied to other fields
    - Extract reusable components that can be applied across contexts
    - Create skill primitives that serve as building blocks for composition
-   - General enough to transfer, specific enough to be actionable
+   - General enough to transfer to other domains, specific enough to be actionable
+   - **Extract skills from ALL major clusters and domains comprehensively, not just merge everything into a few skills**
 
 2. **Hierarchical Skill Learning - Multi-Level Organization**:
    Following GSL framework principles:
-   - **Fundamental Level**: Core principles and theories that underlie multiple domains
-   - **General Level**: Broad techniques applicable across related problem types
-   - **Specific Level**: Domain-specific applications (preserve original skills here)
+   - **Fundamental Level**: Core principles and theories that underlie multiple domains - extract many of these
+   - **General Level**: Broad techniques applicable across related problem types - extract many of these
+   - **Cross-Domain Skills**: Skills that can be derived/applied to fields beyond their origin - extract many of these
    - Each level should guide the level below it
    - Skills should be organized in a hierarchy where higher levels subsume lower levels
+   - **Extract skills at all levels comprehensively**
 
-2. **Preserve Original Skills**:
-   - Original skills (both from encyclopedia and clients) remain available
-   - General skills should reference and work WITH original skills
-   - General skills provide a framework for selecting and using original skills
+3. **Cross-Domain Transfer - Extract Universal Patterns**:
+   - For each skill cluster, identify patterns that appear across different fields
+   - Extract skills that can be DERIVED into other domains (e.g., a skill from one field that applies to another)
+   - Create skills that capture universal principles (e.g., attention mechanisms, optimization strategies, regularization techniques)
+   - Document which skills transfer well across domains in the "When to use" section
+   - **Extract many cross-domain skills that can be applied beyond their original field**
 
-3. **Better Skills**:
-   - More fundamental and general than original skills
-   - Can guide the use of original skills
-   - Include cross-domain insights and patterns
+4. **Preserve and Generalize Original Skills**:
+   - DO NOT simply merge all skills into a few generic ones
+   - Instead, extract fundamental versions of original skills that are more general but preserve their essence
+   - For similar skills, create a more fundamental version that can guide both, but also preserve important variations
+   - Original skills remain available - general skills should be able to derive/guide them
+   - **Extract fundamental versions of important original skills comprehensively, not just merge them**
+
+5. **Better Skills - More Fundamental and Cross-Domain**:
+   - More fundamental and general than original skills, but still specific enough to be actionable
+   - Can guide the use of original skills and be derived into other fields
+   - Include cross-domain insights and patterns in the description
    - Still actionable with clear step-by-step instructions
+   - **Each skill should specify which domains it can be applied to beyond its origin**
 
 **Output Format (Simple - Same as client.py):**
 Output a simple JSON object with skill names as keys and descriptions as string values, exactly like client.py format:
@@ -631,6 +648,18 @@ Each description must be a single string containing all the following sections, 
   "skill_taylorExpansionApproximation": "When to use: When you need to approximate complex functions, analyze local behavior, or simplify nonlinear problems. This fundamental technique applies across calculus, physics, engineering, numerical analysis, machine learning, and optimization. Use Taylor expansion when: functions are too complex to work with directly, you need to understand behavior near a point, you want to linearize nonlinear systems, or you need numerical approximations. This skill is essential for understanding derivatives, optimization, differential equations, and function approximation. Step-by-step: 1) Identify the function to expand and the point of expansion - choose the expansion point (often x=0 for Maclaurin series, or a point where the function is well-behaved) based on where you need the approximation to be accurate 2) Calculate derivatives at the expansion point - compute the function value and its derivatives (first, second, third, etc.) at the chosen point, either analytically or numerically 3) Construct the Taylor series - use the formula f(x) = f(a) + f'(a)(x-a) + f''(a)(x-a)²/2! + f'''(a)(x-a)³/3! + ... where a is the expansion point, continuing to the desired order of approximation 4) Determine the order needed - assess how many terms are required based on desired accuracy, convergence properties, and the range of x values you need to approximate 5) Apply the approximation - use the truncated series to approximate the function, solve equations, or analyze behavior, being mindful of the approximation error 6) Estimate error bounds - use the remainder term (Lagrange or integral form) to bound the approximation error and ensure it meets accuracy requirements 7) Verify and refine - check the approximation against known values or higher-order expansions, and refine if necessary. Key insights: Taylor expansion reveals local structure of functions and enables linearization of nonlinear problems. Lower-order terms often capture the most important behavior. This principle underlies calculus, numerical methods, physics (small angle approximations, perturbation theory), machine learning (gradient descent uses first-order Taylor expansion), and engineering (linearization of nonlinear systems). The expansion point choice is critical - expanding around a point where the function is smooth and well-behaved yields better approximations."
 }}
 
+**CRITICAL: Extract Many Fundamental and Cross-Domain Skills**
+
+You should extract a comprehensive set of fundamental skills. DO NOT over-merge or create too few skills. The goal is to have many fundamental, cross-domain skills that can guide and derive the original skills.
+
+**Strategy for Extracting Many Skills:**
+1. For each skill cluster, extract multiple fundamental skills that capture different aspects and variations
+2. For each major domain area, extract multiple cross-domain skills that can be applied to other fields
+3. Extract fundamental versions of important original skills (don't just merge them all)
+4. Create skills for universal patterns (attention mechanisms, optimization strategies, regularization techniques, etc.)
+5. Extract skills for common problem-solving patterns that appear across domains
+6. Think comprehensively - extract from all clusters, all domains, all important patterns
+
 **CRITICAL: Avoid Generic/Fallback Skills**
 DO NOT create skills that are:
 - Overly generic or universal (e.g., "general problem-solving", "systematic approach", "careful analysis")
@@ -645,6 +674,7 @@ DO NOT create skills that are:
 - Has clear, actionable steps with specific techniques
 - Addresses a particular class of problems with identifiable characteristics
 - Provides domain-specific insights or methods that can be transferred
+- **Can be derived/applied to fields beyond its original domain** (specify in "When to use")
 
 **Examples of BAD skills (DO NOT CREATE):**
 - "skill_fallback": "When to use: For any problem-solving task..." (TOO GENERIC)
@@ -657,21 +687,23 @@ DO NOT create skills that are:
 - "skill_polynomialFactoring": Specific algebraic technique with concrete methods
 
 **Critical Requirements (Based on Research):**
-1. **Output Format**: Must be simple JSON with skill_name: description (exactly like client.py format)
-2. **Description Format**: Must include "When to use:" and "Step-by-step:" sections in the description string (same as client.py)
-3. **Knowledge Distillation**: Extract higher-level abstractions that preserve essential information while generalizing
-4. **Hierarchical Organization**: Create skills at different levels (fundamental → general → specific) where higher levels guide lower levels
-5. **Skill Composition**: Skills should be composable - can be chained together for complex problems (following Generative Skill Chaining)
-6. **Cross-Domain Transfer**: Include cross-domain insights (universal patterns) and in-domain patterns in descriptions
-7. **Reusable Primitives**: Extract reusable skill primitives that can be applied across contexts (object-centric representation)
-8. **Better Skills**: Skills should be more general and fundamental than original skills, but still actionable and SPECIFIC
-9. **Merge Skills**: Merge similar skills from previous encyclopedia and client skills into better, unified versions
-10. **Preserve Original**: Original skills remain available - general skills should be able to guide/derive them
+1. **Comprehensive Extraction**: Extract fundamental skills comprehensively from ALL major clusters and domains. DO NOT create only a few skills - extract many fundamental and cross-domain skills that can guide the original skills.
+2. **Output Format**: Must be simple JSON with skill_name: description (exactly like client.py format)
+3. **Description Format**: Must include "When to use:" and "Step-by-step:" sections in the description string (same as client.py)
+4. **Knowledge Distillation**: Extract higher-level abstractions that preserve essential information while generalizing - extract from EACH cluster comprehensively, not just merge everything
+5. **Hierarchical Organization**: Create skills at different levels (fundamental → general → specific) where higher levels guide lower levels - extract skills at all levels comprehensively
+6. **Cross-Domain Transfer**: Include cross-domain insights (universal patterns) in descriptions - specify which OTHER domains each skill can be applied to
+7. **Reusable Primitives**: Extract reusable skill primitives that can be applied across contexts (object-centric representation) - extract multiple skills from each cluster
+8. **Better Skills**: Skills should be more general and fundamental than original skills, but still actionable and SPECIFIC - extract fundamental versions comprehensively, don't just merge
+9. **Extract, Don't Just Merge**: For similar skills, extract a more fundamental version that can guide both, but also extract domain-specific variations and important distinctions
+10. **Preserve Original**: Original skills remain available - general skills should be able to guide/derive them - extract fundamental versions that can derive original skills
 11. **Actionable**: Each skill must have detailed, numbered step-by-step instructions with SPECIFIC techniques
 12. **Complete**: Include all necessary information in the description string (when to use, steps, insights, example)
-13. **Portable**: Skills should be portable - applicable across different domains and contexts (Anthropic Skills principle)
+13. **Portable**: Skills should be portable - applicable across different domains and contexts (Anthropic Skills principle) - specify cross-domain applications
 14. **Specificity**: Skills must be specific enough to provide concrete value - avoid generic fallback skills
-15. **Domain-Bounded**: Skills should apply to a class of related problems, not "all problems"
+15. **Domain-Bounded**: Skills should apply to a class of related problems, not "all problems" - but specify which OTHER domains they can be applied to
+16. **Cross-Domain Application**: Each skill's "When to use" section should explicitly mention which domains beyond its origin it can be applied to
+17. **Comprehensive Coverage**: Extract skills comprehensively - think about all clusters, all domains, all important patterns, all universal principles
 
 **Existing Encyclopedia (if any):**
 {existing_encyclopedia if existing_encyclopedia else "None"}
