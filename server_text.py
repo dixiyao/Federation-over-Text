@@ -407,7 +407,13 @@ Analyze these skills and build a profiling of their relationships:
    - **Derivation relationships**: Skills derived from or based on others
    - **Similar relationships**: Skills that are similar but not identical
 
-**Output Format (JSON) - Simplified:**
+**Important Guidelines:**
+- **Clusters**: Create meaningful clusters based on shared themes. Individual skills can be in separate clusters.
+- **Relationships**: Record all important relationships - skills don't exist in isolation
+- **Be thorough**: Map relationships between skills within clusters and across clusters
+- **Preserve Original Skills**: Keep original skill names in clusters and relationships for traceability
+
+# Output Format:
 {{
   "clusters": [
     {{
@@ -427,12 +433,6 @@ Analyze these skills and build a profiling of their relationships:
     }}
   ]
 }}
-
-**Important Guidelines:**
-- **Clusters**: Create meaningful clusters based on shared themes. Individual skills can be in separate clusters.
-- **Relationships**: Record all important relationships - skills don't exist in isolation
-- **Be thorough**: Map relationships between skills within clusters and across clusters
-- **Preserve Original Skills**: Keep original skill names in clusters and relationships for traceability
 
 **Output your analysis as JSON only:**
 """
