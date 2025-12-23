@@ -613,11 +613,6 @@ Your goal is to extract a comprehensive set of fundamental, cross-domain skills 
    - Still actionable with clear step-by-step instructions
    - **Each skill should specify which domains it can be applied to beyond its origin**
 
-**Output Format (Simple - Same as client.py):**
-Output a simple JSON object with skill names as keys and descriptions as string values, exactly like client.py format:
-
-{{"skill_name": "description"}}
-
 **Description Format (Must match client.py exactly):**
 Each description must be a single string containing all the following sections, separated naturally in the text:
 
@@ -714,7 +709,13 @@ DO NOT create skills that are:
 **Existing Encyclopedia (if any):**
 {existing_encyclopedia if existing_encyclopedia else "None"}
 
+# Output Format:
+Output a simple JSON object with skill names as keys and descriptions as string values, exactly like client.py format:
+
+{{"skill_name": "description"}}
+
 **Output your extracted knowledge as JSON only:**
+
 """
         return prompt
 
