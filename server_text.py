@@ -451,14 +451,20 @@ Analyze these skills and build a profiling of their relationships:
 
         # Extract JSON from response
         json_content = self._extract_json_only(response)
+        profiling_data = self._try_parse_json(json_content)
 
-        try:
-            profiling_data = json.loads(json_content)
-            self.skill_relationships = profiling_data
-        except json.JSONDecodeError as e:
-            print(f"Warning: Could not parse profiling JSON: {e}")
-            print("Using raw response as profiling data")
-            self.skill_relationships = {"raw_response": response}
+        if profiling_data is None:
+            print(
+                "Warning: Could not parse profiling JSON. Falling back to minimal structure."
+            )
+            profiling_data = {
+                "clusters": [],
+                "relationships": [],
+                "skills": list(skill_store.keys()),
+                "raw_response": response,
+            }
+
+        self.skill_relationships = profiling_data
 
         step_result = {
             "step": 2,
@@ -728,8 +734,17 @@ DO NOT create skills that are:
 
         # Extract JSON from response
         json_content = self._extract_json_only(response)
+        encyclopedia_dict = self._try_parse_json(json_content)
 
-        # Update encyclopedia
+        # Fallback: if the model output is not valid JSON, revert to collected skills
+        if encyclopedia_dict is None:
+            print(
+                "Warning: Knowledge extraction output is not valid JSON. Falling back to collected skills."
+            )
+            encyclopedia_dict = self._build_fallback_encyclopedia(skill_store)
+            json_content = json.dumps(encyclopedia_dict, indent=2, ensure_ascii=False)
+
+        # Update encyclopedia (guaranteed to be JSON string)
         self.encyclopedia = json_content
 
         step_result = {
@@ -738,6 +753,7 @@ DO NOT create skills that are:
             "prompt": prompt,
             "response": response,
             "encyclopedia": json_content,
+            "encyclopedia_dict": encyclopedia_dict,
             "timestamp": time.time(),
         }
 
@@ -782,6 +798,19 @@ DO NOT create skills that are:
                 return text[start_idx : last_brace + 1]
 
         return text
+
+    def _try_parse_json(self, text: str) -> Optional[Dict]:
+        """Safely try to parse JSON; return None if parsing fails"""
+        try:
+            return json.loads(text)
+        except Exception:
+            return None
+
+    def _build_fallback_encyclopedia(self, skill_store: Dict) -> Dict:
+        """Fallback encyclopedia: use collected skills when model output is not valid JSON"""
+        if not skill_store:
+            return {}
+        return {name: desc for name, desc in skill_store.items() if desc}
 
     def _load_existing_encyclopedia(self, output_dir: str) -> str:
         """Load existing encyclopedia from output directory if it exists"""
@@ -871,24 +900,22 @@ DO NOT create skills that are:
         encyclopedia_path = os.path.join(output_dir, "encyclopedia.json")
 
         # Parse encyclopedia JSON string and save as formatted JSON
-        try:
-            encyclopedia_dict = json.loads(self.encyclopedia)
-            with open(encyclopedia_path, "w", encoding="utf-8") as f:
-                json.dump(encyclopedia_dict, f, indent=2, ensure_ascii=False)
-            print(f"Encyclopedia saved to: {encyclopedia_path}")
-        except json.JSONDecodeError:
+        encyclopedia_dict = self._try_parse_json(self.encyclopedia)
+
+        if encyclopedia_dict is None:
             # If not valid JSON, try to extract JSON from the string
             json_content = self._extract_json_only(self.encyclopedia)
-            if json_content:
-                encyclopedia_dict = json.loads(json_content)
-                with open(encyclopedia_path, "w", encoding="utf-8") as f:
-                    json.dump(encyclopedia_dict, f, indent=2, ensure_ascii=False)
-                print(f"Encyclopedia saved to: {encyclopedia_path}")
-            else:
-                print(f"Warning: Could not parse encyclopedia as JSON. Saving raw content.")
-                with open(encyclopedia_path, "w", encoding="utf-8") as f:
-                    f.write(self.encyclopedia)
-                print(f"Encyclopedia saved to: {encyclopedia_path}")
+            encyclopedia_dict = self._try_parse_json(json_content)
+
+        if encyclopedia_dict is None:
+            print(
+                "Warning: Could not parse encyclopedia as JSON. Falling back to collected skills."
+            )
+            encyclopedia_dict = self._build_fallback_encyclopedia(self.skill_store)
+
+        with open(encyclopedia_path, "w", encoding="utf-8") as f:
+            json.dump(encyclopedia_dict, f, indent=2, ensure_ascii=False)
+        print(f"Encyclopedia saved to: {encyclopedia_path}")
 
 
 if __name__ == "__main__":
