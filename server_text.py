@@ -435,6 +435,7 @@ Analyze these skills and build a profiling of their relationships:
 }}
 
 **Output your analysis as JSON only:**
+
 """
         return prompt
 
