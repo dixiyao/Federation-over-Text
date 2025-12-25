@@ -22,6 +22,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 try:
     import google.generativeai as genai
+
     HAS_GEMINI = True
 except ImportError:
     HAS_GEMINI = False
@@ -70,9 +71,11 @@ class SkillAggregationServer:
                     "google-generativeai is required for Gemini API. Install with: pip install google-generativeai"
                 )
             if not self.gemini_api_key:
-                raise ValueError("Gemini API key is required when use_gemini=True. Set GEMINI_API_KEY env var or pass gemini_api_key parameter.")
+                raise ValueError(
+                    "Gemini API key is required when use_gemini=True. Set GEMINI_API_KEY env var or pass gemini_api_key parameter."
+                )
             genai.configure(api_key=self.gemini_api_key)
-            self.gemini_model = genai.GenerativeModel('gemini-3-pro-preview')
+            self.gemini_model = genai.GenerativeModel("gemini-3-pro-preview")
 
         # Model and tokenizer will be loaded lazily on first use (only for HuggingFace models)
         self.model = None
@@ -150,7 +153,7 @@ class SkillAggregationServer:
         # Use Gemini API if configured
         if self.use_gemini:
             return self._call_gemini(prompt, system_prompt)
-        
+
         # Otherwise use HuggingFace model
         # Load model if not already loaded
         self._load_model()
@@ -219,8 +222,13 @@ class SkillAggregationServer:
         except Exception as e:
             print(f"Error calling model: {e}")
             return f"[Error] Model generation failed: {str(e)}"
-    
-    def _call_gemini(self, prompt: str, system_prompt: Optional[str] = None, max_new_tokens: Optional[int] = None) -> str:
+
+    def _call_gemini(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        max_new_tokens: Optional[int] = None,
+    ) -> str:
         """Call Gemini API"""
         try:
             # Combine system prompt and user prompt
@@ -228,49 +236,62 @@ class SkillAggregationServer:
                 full_prompt = f"{system_prompt}\n\n{prompt}"
             else:
                 full_prompt = prompt
-            
+
             # Configure generation parameters - use Gemini defaults, only set max_output_tokens
             generation_config = {}
             if max_new_tokens:
                 generation_config["max_output_tokens"] = max_new_tokens
-            
+
             # Generate response
             if generation_config:
                 response = self.gemini_model.generate_content(
-                    full_prompt,
-                    generation_config=generation_config
+                    full_prompt, generation_config=generation_config
                 )
             else:
                 response = self.gemini_model.generate_content(full_prompt)
-            
+
             # Handle response safely - check for blocked/filtered content
             if not response.candidates:
-                raise RuntimeError("Gemini API returned no candidates. Response may have been blocked.")
-            
+                raise RuntimeError(
+                    "Gemini API returned no candidates. Response may have been blocked."
+                )
+
             candidate = response.candidates[0]
             if candidate.finish_reason == 2:  # MAX_TOKENS
                 # Hit token limit, but try to get partial text
                 if candidate.content and candidate.content.parts:
-                    text_parts = [part.text for part in candidate.content.parts if hasattr(part, 'text') and part.text]
+                    text_parts = [
+                        part.text
+                        for part in candidate.content.parts
+                        if hasattr(part, "text") and part.text
+                    ]
                     if text_parts:
                         return "\n".join(text_parts).strip()
-                raise RuntimeError("Gemini API hit token limit and no text was returned.")
+                raise RuntimeError(
+                    "Gemini API hit token limit and no text was returned."
+                )
             elif candidate.finish_reason == 3:  # SAFETY
-                raise RuntimeError("Gemini API blocked the response due to safety filters.")
+                raise RuntimeError(
+                    "Gemini API blocked the response due to safety filters."
+                )
             elif candidate.finish_reason == 4:  # RECITATION
                 raise RuntimeError("Gemini API blocked the response due to recitation.")
-            
+
             # Try to get text from response
             try:
                 return response.text.strip()
             except ValueError as e:
                 # If response.text fails, try to extract from parts manually
                 if candidate.content and candidate.content.parts:
-                    text_parts = [part.text for part in candidate.content.parts if hasattr(part, 'text') and part.text]
+                    text_parts = [
+                        part.text
+                        for part in candidate.content.parts
+                        if hasattr(part, "text") and part.text
+                    ]
                     if text_parts:
                         return "\n".join(text_parts).strip()
                 raise RuntimeError(f"Failed to extract text from Gemini response: {e}")
-            
+
         except Exception as e:
             raise RuntimeError(f"Error calling Gemini API: {e}")
 
@@ -345,11 +366,19 @@ class SkillAggregationServer:
                 elif isinstance(data, dict) and not skill_book_raw:
                     # Check if data itself is a skill book (direct format from client.py)
                     # If all keys start with "skill_" or most keys are strings with descriptions
-                    skill_keys = [k for k in data.keys() if isinstance(k, str) and k.startswith("skill_")]
+                    skill_keys = [
+                        k
+                        for k in data.keys()
+                        if isinstance(k, str) and k.startswith("skill_")
+                    ]
                     if len(skill_keys) > 0 and len(skill_keys) >= len(data) * 0.8:
                         # This is likely a direct skill book dictionary
                         skill_book = data
-                    elif all(isinstance(v, str) and len(v) > 20 for v in data.values() if isinstance(v, str)):
+                    elif all(
+                        isinstance(v, str) and len(v) > 20
+                        for v in data.values()
+                        if isinstance(v, str)
+                    ):
                         # All values are strings (likely descriptions), treat as skill book
                         skill_book = data
 

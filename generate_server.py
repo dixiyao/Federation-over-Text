@@ -1,6 +1,15 @@
 """
 Generate Server - Inference using Encyclopedia
-Simple inference server that uses the aggregated encyclopedia to answer queries.
+
+NOTE: This is a standalone CLI tool for querying the encyclopedia directly.
+For use in pipelines, use client.py's solve_with_encyclopedia() method instead:
+- math_pipeline.py uses client.solve_with_encyclopedia()
+- math_domain.py uses client.solve_with_encyclopedia()
+
+This file is kept for:
+1. Command-line querying of the encyclopedia (see example_command.sh)
+2. Standalone testing and demos
+3. Direct API usage without the full pipeline
 """
 
 import argparse
@@ -23,6 +32,7 @@ except ImportError:
 
 try:
     import google.generativeai as genai
+
     HAS_GEMINI = True
 except ImportError:
     HAS_GEMINI = False
@@ -57,9 +67,11 @@ class GenerateServer:
                     "google-generativeai is required for Gemini API. Install with: pip install google-generativeai"
                 )
             if not self.gemini_api_key:
-                raise ValueError("Gemini API key is required when use_gemini=True. Set GEMINI_API_KEY env var or pass gemini_api_key parameter.")
+                raise ValueError(
+                    "Gemini API key is required when use_gemini=True. Set GEMINI_API_KEY env var or pass gemini_api_key parameter."
+                )
             genai.configure(api_key=self.gemini_api_key)
-            self.gemini_model = genai.GenerativeModel('gemini-3-pro-preview')
+            self.gemini_model = genai.GenerativeModel("gemini-3-pro-preview")
 
         # Model and tokenizer will be loaded lazily on first use (only for HuggingFace models)
         self.model = None
@@ -72,7 +84,7 @@ class GenerateServer:
         self.graphrag_graph = None
         self.embedding_model = None
         self.embedding_model_name = "BAAI/bge-base-en-v1.5"
-        
+
         # System prompt for text mode
         self.system_prompt = "Using the skill set as the help, when necessary please refer to the skills and guide you resolve question."
 
@@ -340,22 +352,22 @@ class GenerateServer:
         """
         Get the prompt for generating an answer using the encyclopedia.
         Returns (system_prompt, user_prompt) tuple.
-        
+
         For text mode: Uses system prompt with skills.
         For normal mode: Uses GraphRAG retrieval (no system prompt for DeepSeek-R1).
         """
         system_prompt = None
         user_prompt = ""
-        
+
         if self.mode == "text":
             # Text mode: Use system prompt and full encyclopedia.json
             system_prompt = self.system_prompt
-            
+
             # Format skills from encyclopedia.json
             skills_list = []
             for skill_name, skill_desc in self.encyclopedia_dict.items():
                 skills_list.append(f"**{skill_name}**:\n{skill_desc}")
-            
+
             skills_text = "\n\n".join(skills_list)
             skills_section = f"""Skills Encyclopedia:
 
@@ -363,7 +375,7 @@ class GenerateServer:
 
 ---
 """
-            
+
             if is_math:
                 user_prompt = f"""{skills_section}Problem: {query}
 
@@ -444,7 +456,7 @@ Based on the relevant skills above, provide a clear and comprehensive answer to 
 
 <think>
 """
-        
+
         return (system_prompt, user_prompt)
 
     def generate(
@@ -483,7 +495,7 @@ Based on the relevant skills above, provide a clear and comprehensive answer to 
                 full_prompt = f"{system_prompt}\n\n{user_prompt}"
             else:
                 full_prompt = user_prompt
-            
+
             # Tokenize input
             inputs = self.tokenizer(
                 full_prompt,
@@ -524,63 +536,81 @@ Based on the relevant skills above, provide a clear and comprehensive answer to 
         except Exception as e:
             print(f"Error generating response: {e}")
             return f"[Error] Generation failed: {str(e)}"
-    
-    def _call_gemini(self, prompt: str, system_prompt: Optional[str] = None, max_new_tokens: Optional[int] = None) -> str:
+
+    def _call_gemini(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        max_new_tokens: Optional[int] = None,
+    ) -> str:
         """Call Gemini API"""
         try:
             # Use provided max_new_tokens or fall back to instance default
             max_tokens = (
                 max_new_tokens if max_new_tokens is not None else self.max_new_tokens
             )
-            
+
             # Combine system prompt and user prompt (Gemini API doesn't support system_instruction parameter)
             if system_prompt:
                 full_prompt = f"{system_prompt}\n\n{prompt}"
             else:
                 full_prompt = prompt
-            
+
             # Configure generation parameters - use Gemini defaults, only set max_output_tokens
             generation_config = {}
             if max_tokens:
                 generation_config["max_output_tokens"] = max_tokens
-            
+
             # Generate response
             if generation_config:
                 response = self.gemini_model.generate_content(
-                    full_prompt,
-                    generation_config=generation_config
+                    full_prompt, generation_config=generation_config
                 )
             else:
                 response = self.gemini_model.generate_content(full_prompt)
-            
+
             # Handle response safely - check for blocked/filtered content
             if not response.candidates:
-                raise RuntimeError("Gemini API returned no candidates. Response may have been blocked.")
-            
+                raise RuntimeError(
+                    "Gemini API returned no candidates. Response may have been blocked."
+                )
+
             candidate = response.candidates[0]
             if candidate.finish_reason == 2:  # MAX_TOKENS
                 # Hit token limit, but try to get partial text
                 if candidate.content and candidate.content.parts:
-                    text_parts = [part.text for part in candidate.content.parts if hasattr(part, 'text') and part.text]
+                    text_parts = [
+                        part.text
+                        for part in candidate.content.parts
+                        if hasattr(part, "text") and part.text
+                    ]
                     if text_parts:
                         return "\n".join(text_parts).strip()
-                raise RuntimeError("Gemini API hit token limit and no text was returned.")
+                raise RuntimeError(
+                    "Gemini API hit token limit and no text was returned."
+                )
             elif candidate.finish_reason == 3:  # SAFETY
-                raise RuntimeError("Gemini API blocked the response due to safety filters.")
+                raise RuntimeError(
+                    "Gemini API blocked the response due to safety filters."
+                )
             elif candidate.finish_reason == 4:  # RECITATION
                 raise RuntimeError("Gemini API blocked the response due to recitation.")
-            
+
             # Try to get text from response
             try:
                 return response.text.strip()
             except ValueError as e:
                 # If response.text fails, try to extract from parts manually
                 if candidate.content and candidate.content.parts:
-                    text_parts = [part.text for part in candidate.content.parts if hasattr(part, 'text') and part.text]
+                    text_parts = [
+                        part.text
+                        for part in candidate.content.parts
+                        if hasattr(part, "text") and part.text
+                    ]
                     if text_parts:
                         return "\n".join(text_parts).strip()
                 raise RuntimeError(f"Failed to extract text from Gemini response: {e}")
-            
+
         except Exception as e:
             raise RuntimeError(f"Error calling Gemini API: {e}")
 

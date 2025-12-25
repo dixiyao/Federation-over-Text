@@ -1,3 +1,5 @@
+from .utils import accuracy
+
 math500_prompt = (
     '\nSolve the problem step by step. Wrap your final answer in "\\boxed{}".'
 )
@@ -11,20 +13,6 @@ def math500_formatter(example):
     answer_text = example["answer"]
 
     return question_text, answer_text
-
-
-def accuracy(predictions, answers):
-    """
-    Calculate accuracy of predictions.
-    """
-    correct = 0
-    total = len(predictions)
-
-    for prediction, answer in zip(predictions, answers):
-        if prediction == answer:
-            correct += 1
-
-    return correct / total if total > 0 else 0.0
 
 
 def math500_scorer(predictions, answers):

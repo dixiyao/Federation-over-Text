@@ -11,7 +11,7 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 import PyPDF2
 import torch
@@ -19,6 +19,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 try:
     import google.generativeai as genai
+
     HAS_GEMINI = True
 except ImportError:
     HAS_GEMINI = False
@@ -50,12 +51,12 @@ class ChainOfThoughtReader:
             or "Analyze this paper and identify key contributions, limitations, and potential future research directions."
         )
         self.behavior_book = {}  # Store extracted behaviors
-        
+
         # Encyclopedia support (for solving with learned skills)
         self.encyclopedia = ""
         self.encyclopedia_dict = {}
         self.encyclopedia_loaded = False
-        
+
         # Gemini API support
         self.use_gemini = use_gemini
         self.gemini_api_key = gemini_api_key or os.getenv("GEMINI_API_KEY")
@@ -65,36 +66,38 @@ class ChainOfThoughtReader:
                     "google-generativeai is required for Gemini API. Install with: pip install google-generativeai"
                 )
             if not self.gemini_api_key:
-                raise ValueError("Gemini API key is required when use_gemini=True. Set GEMINI_API_KEY env var or pass gemini_api_key parameter.")
+                raise ValueError(
+                    "Gemini API key is required when use_gemini=True. Set GEMINI_API_KEY env var or pass gemini_api_key parameter."
+                )
             genai.configure(api_key=self.gemini_api_key)
-            self.gemini_model = genai.GenerativeModel('gemini-3-pro-preview')
-        
+            self.gemini_model = genai.GenerativeModel("gemini-3-pro-preview")
+
         # Model and tokenizer will be loaded lazily on first use (only for HuggingFace models)
         self.model = None
         self.tokenizer = None
         self.device = device or ("cuda" if self._check_cuda() else "cpu")
-        
+
     def _check_cuda(self) -> bool:
         """Check if CUDA is available"""
         try:
             return torch.cuda.is_available()
         except ImportError:
             return False
-    
+
     def _load_model(self):
         """Lazy load the Hugging Face model and tokenizer"""
         if self.model is not None and self.tokenizer is not None:
             return
-        
+
         try:
             print(f"Loading model: {self.model_name}")
             print(f"Device: {self.device}")
-            
+
             # Load tokenizer
             self.tokenizer = AutoTokenizer.from_pretrained(
                 self.model_name, trust_remote_code=True
             )
-            
+
             # Load model
             # Use torch_dtype instead of dtype for from_pretrained
             model_kwargs = {
@@ -110,16 +113,16 @@ class ChainOfThoughtReader:
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.model_name, **model_kwargs
             )
-            
+
             if self.device == "cpu":
                 self.model = self.model.to(self.device)
-            
+
             # Set pad token if not present
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
-            
+
             print("Model loaded successfully!")
-            
+
         except ImportError:
             raise ImportError(
                 "transformers and torch are required. Install with: pip install transformers torch"
@@ -174,32 +177,32 @@ class ChainOfThoughtReader:
     ) -> str:
         """
         Call the language model (HuggingFace or Gemini API).
-        
+
         Args:
             prompt: The user prompt
             system_prompt: Optional system prompt (will be prepended if provided)
             max_new_tokens: Maximum number of new tokens to generate. If None, uses default 32768.
-        
+
         Returns:
             Generated text response
         """
         # Use Gemini API if configured
         if self.use_gemini:
             return self._call_gemini(prompt, system_prompt, max_new_tokens)
-        
+
         # Otherwise use HuggingFace model
         # Load model if not already loaded
         self._load_model()
-        
+
         # For DeepSeek-R1: Avoid system prompts, put all instructions in user prompt
         # If system_prompt is provided, combine it into the user prompt
         if system_prompt:
             full_prompt = f"{system_prompt}\n\n{prompt}"
         else:
             full_prompt = prompt
-        
+
         try:
-            
+
             # Tokenize input
             # For papers with ~80k characters, we need ~20-30k tokens
             # DeepSeek-R1 supports large context windows (64k+ tokens)
@@ -221,7 +224,7 @@ class ChainOfThoughtReader:
             print(
                 f"Input tokens: {input_token_count}, Max new tokens: {max_new_tokens}"
             )
-            
+
             # Generate response
             with torch.no_grad():
                 # Use standard settings for reliable generation
@@ -251,17 +254,17 @@ class ChainOfThoughtReader:
                         repetition_penalty=1.1,
                         pad_token_id=self.tokenizer.eos_token_id,
                     )
-            
+
             # Decode response
             generated_text = self.tokenizer.decode(
                 outputs[0][inputs["input_ids"].shape[1] :], skip_special_tokens=True
             )
-            
+
             return generated_text.strip()
-            
+
         except Exception as e:
             print(f"Error calling model: {e}")
-    
+
     def _call_gemini(
         self,
         prompt: str,
@@ -275,55 +278,68 @@ class ChainOfThoughtReader:
                 full_prompt = f"{system_prompt}\n\n{prompt}"
             else:
                 full_prompt = prompt
-            
+
             # Configure generation parameters - use Gemini defaults, only set max_output_tokens
             generation_config = {}
             if max_new_tokens:
                 generation_config["max_output_tokens"] = max_new_tokens
-            
+
             # Generate response
             if generation_config:
                 response = self.gemini_model.generate_content(
-                    full_prompt,
-                    generation_config=generation_config
+                    full_prompt, generation_config=generation_config
                 )
             else:
                 response = self.gemini_model.generate_content(full_prompt)
-            
+
             # Handle response safely - check for blocked/filtered content
             if not response.candidates:
-                raise RuntimeError("Gemini API returned no candidates. Response may have been blocked.")
-            
+                raise RuntimeError(
+                    "Gemini API returned no candidates. Response may have been blocked."
+                )
+
             candidate = response.candidates[0]
             if candidate.finish_reason == 2:  # MAX_TOKENS
                 # Hit token limit, but try to get partial text
                 if candidate.content and candidate.content.parts:
-                    text_parts = [part.text for part in candidate.content.parts if hasattr(part, 'text') and part.text]
+                    text_parts = [
+                        part.text
+                        for part in candidate.content.parts
+                        if hasattr(part, "text") and part.text
+                    ]
                     if text_parts:
                         return "\n".join(text_parts).strip()
-                raise RuntimeError("Gemini API hit token limit and no text was returned.")
+                raise RuntimeError(
+                    "Gemini API hit token limit and no text was returned."
+                )
             elif candidate.finish_reason == 3:  # SAFETY
-                raise RuntimeError("Gemini API blocked the response due to safety filters.")
+                raise RuntimeError(
+                    "Gemini API blocked the response due to safety filters."
+                )
             elif candidate.finish_reason == 4:  # RECITATION
                 raise RuntimeError("Gemini API blocked the response due to recitation.")
-            
+
             # Try to get text from response
             try:
                 return response.text.strip()
             except ValueError as e:
                 # If response.text fails, try to extract from parts manually
                 if candidate.content and candidate.content.parts:
-                    text_parts = [part.text for part in candidate.content.parts if hasattr(part, 'text') and part.text]
+                    text_parts = [
+                        part.text
+                        for part in candidate.content.parts
+                        if hasattr(part, "text") and part.text
+                    ]
                     if text_parts:
                         return "\n".join(text_parts).strip()
                 raise RuntimeError(f"Failed to extract text from Gemini response: {e}")
-            
+
         except Exception as e:
             raise RuntimeError(f"Error calling Gemini API: {e}")
 
     def load_encyclopedia(self, encyclopedia_path: str, mode: str = "text"):
         """Load encyclopedia for solving problems with learned skills.
-        
+
         Args:
             encyclopedia_path: Path to encyclopedia file
             mode: "text" for encyclopedia.json or "normal" for encyclopedia.txt
@@ -334,30 +350,36 @@ class ChainOfThoughtReader:
                 with open(encyclopedia_path, "r", encoding="utf-8") as f:
                     self.encyclopedia_dict = json.load(f)
                 self.encyclopedia = json.dumps(self.encyclopedia_dict, indent=2)
-                print(f"Loaded encyclopedia.json from {encyclopedia_path} ({len(self.encyclopedia_dict)} skills)")
+                print(
+                    f"Loaded encyclopedia.json from {encyclopedia_path} ({len(self.encyclopedia_dict)} skills)"
+                )
             else:
                 # Normal mode: Load encyclopedia.txt
                 with open(encyclopedia_path, "r", encoding="utf-8") as f:
                     self.encyclopedia = f.read()
-                print(f"Loaded encyclopedia from {encyclopedia_path} ({len(self.encyclopedia)} characters)")
-            
+                print(
+                    f"Loaded encyclopedia from {encyclopedia_path} ({len(self.encyclopedia)} characters)"
+                )
+
             self.encyclopedia_loaded = True
         except Exception as e:
-            raise FileNotFoundError(f"Failed to load encyclopedia from {encyclopedia_path}: {e}")
+            raise FileNotFoundError(
+                f"Failed to load encyclopedia from {encyclopedia_path}: {e}"
+            )
 
     def solve_with_encyclopedia(self, problem: str, is_math: bool = True) -> str:
         """Solve a problem using the loaded encyclopedia.
-        
+
         Args:
             problem: The problem to solve
             is_math: Whether this is a math problem
-            
+
         Returns:
             Generated solution with answer
         """
         if not self.encyclopedia_loaded:
             raise ValueError("Encyclopedia not loaded. Call load_encyclopedia() first.")
-        
+
         # Format skills from encyclopedia
         if self.encyclopedia_dict:
             # Text mode: Format from dictionary
@@ -368,14 +390,14 @@ class ChainOfThoughtReader:
         else:
             # Normal mode: Use raw encyclopedia text
             skills_text = self.encyclopedia
-        
+
         skills_section = f"""Skills Encyclopedia:
 
 {skills_text}
 
 ---
 """
-        
+
         # Build prompt similar to generate_server's format
         if is_math:
             user_prompt = f"""{skills_section}Problem: {problem}
@@ -391,10 +413,12 @@ Based on the relevant skills above, provide a clear and comprehensive answer to 
 
 <think>
 """
-        
+
         # Call the model
-        response = self._call_model(user_prompt, system_prompt=None, max_new_tokens=32768)
-        
+        response = self._call_model(
+            user_prompt, system_prompt=None, max_new_tokens=32768
+        )
+
         # Format response with answer markers
         if "## Answer:" not in response:
             # Extract answer if present (look for boxed answer or final line)
@@ -406,8 +430,10 @@ Based on the relevant skills above, provide a clear and comprehensive answer to 
                 # Try to find answer at the end
                 lines = response.strip().split("\\n")
                 if lines:
-                    response = f"{response}\\n\\n## Answer:\\n{lines[-1]}\\n## End of Answer:"
-        
+                    response = (
+                        f"{response}\\n\\n## Answer:\\n{lines[-1]}\\n## End of Answer:"
+                    )
+
         return response
 
     def _get_solution_prompt(self, problem: str) -> str:
@@ -576,7 +602,7 @@ Format Rules:
         # Simple JSON extraction: parse skills from JSON format
         skills = {}
         validation_errors = []
-        
+
         try:
             # Method 1: Extract JSON from markdown code blocks
             json_code_block = re.search(
@@ -586,7 +612,7 @@ Format Rules:
                 json_str = json_code_block.group(1)
             else:
                 # Method 2: Find JSON object in response
-                start_idx = response.find('{')
+                start_idx = response.find("{")
                 if start_idx != -1:
                     # Find matching closing brace
                     brace_count = 0
@@ -597,45 +623,45 @@ Format Rules:
                         if escape_next:
                             escape_next = False
                             continue
-                        if char == '\\':
+                        if char == "\\":
                             escape_next = True
                             continue
                         if char == '"' and not escape_next:
                             in_string = not in_string
                             continue
                         if not in_string:
-                            if char == '{':
+                            if char == "{":
                                 brace_count += 1
-                            elif char == '}':
+                            elif char == "}":
                                 brace_count -= 1
                                 if brace_count == 0:
-                                    json_str = response[start_idx:i+1]
+                                    json_str = response[start_idx : i + 1]
                                     break
                     else:
                         # If no complete match, try last brace
-                        last_brace = response.rfind('}', start_idx)
+                        last_brace = response.rfind("}", start_idx)
                         if last_brace != -1:
-                            json_str = response[start_idx:last_brace+1]
+                            json_str = response[start_idx : last_brace + 1]
                         else:
                             json_str = None
                 else:
                     json_str = None
-            
+
             if json_str:
                 try:
                     # Simple cleanup
-                    json_str = re.sub(r',\s*}', '}', json_str)
-                    json_str = re.sub(r',\s*]', ']', json_str)
-                    
+                    json_str = re.sub(r",\s*}", "}", json_str)
+                    json_str = re.sub(r",\s*]", "]", json_str)
+
                     # Parse JSON
                     json_data = json.loads(json_str)
-                    
+
                     if isinstance(json_data, dict):
                         for skill_name, skill_desc in json_data.items():
                             # Ensure skill name starts with skill_
                             if not skill_name.startswith("skill_"):
                                 skill_name = f"skill_{skill_name}"
-                            
+
                             # Convert to string and normalize
                             if isinstance(skill_desc, dict):
                                 skill_desc = str(skill_desc)
@@ -643,20 +669,22 @@ Format Rules:
                                 skill_desc = " ".join(str(item) for item in skill_desc)
                             elif not isinstance(skill_desc, str):
                                 skill_desc = str(skill_desc)
-                            
+
                             # Normalize whitespace
-                            skill_desc = re.sub(r'\s+', ' ', skill_desc).strip()
-                            
+                            skill_desc = re.sub(r"\s+", " ", skill_desc).strip()
+
                             # Validate
                             if len(skill_desc) >= 20:
                                 skills[skill_name] = skill_desc
                             else:
-                                validation_errors.append(f"Skill '{skill_name}' has too short description")
-                    
+                                validation_errors.append(
+                                    f"Skill '{skill_name}' has too short description"
+                                )
+
                 except json.JSONDecodeError as e:
                     print(f"Warning: JSON decode error: {e}")
                     validation_errors.append(f"JSON parsing error: {e}")
-            
+
             # Method 3: Fallback - extract using regex if JSON parsing failed
             if not skills:
                 print("Warning: JSON parsing failed. Attempting regex extraction.")
@@ -665,19 +693,21 @@ Format Rules:
                 name_pattern = r'"skill_\w+"'
                 names = re.findall(name_pattern, response)
                 descriptions = re.findall(skill_pattern, response)
-                
+
                 for i, name in enumerate(names):
                     if i < len(descriptions):
                         skill_name = name.strip('"')
-                        skill_desc = descriptions[i].replace('\\"', '"').replace('\\n', ' ')
-                        skill_desc = re.sub(r'\s+', ' ', skill_desc).strip()
+                        skill_desc = (
+                            descriptions[i].replace('\\"', '"').replace("\\n", " ")
+                        )
+                        skill_desc = re.sub(r"\s+", " ", skill_desc).strip()
                         if len(skill_desc) >= 20:
                             skills[skill_name] = skill_desc
-            
+
         except Exception as e:
             print(f"Warning: Error parsing skills: {e}")
             validation_errors.append(f"Exception during parsing: {e}")
-        
+
         if not skills:
             validation_errors.append("Could not extract any skills from response")
 
@@ -904,12 +934,12 @@ Please answer the user's question based on the paper content provided above."""
         # Ensure output directory exists
         output_dir = Path(self.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        
+
         skill_book = reasoning_result.get("behavior_book", {})
         if not skill_book:
             print("No skills to save")
             return
-        
+
         if output_path is None:
             # Create a safe filename from the problem/question
             safe_name = re.sub(
@@ -999,7 +1029,7 @@ if __name__ == "__main__":
 
     # Example usage
     reader = ChainOfThoughtReader(
-        model_name=args.model, 
+        model_name=args.model,
         task=args.task,
         device=args.device,
         papers_dir=args.papers_dir,

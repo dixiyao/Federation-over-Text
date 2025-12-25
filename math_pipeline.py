@@ -1,14 +1,13 @@
 """
 Math Problem Solving Pipeline
 Uses client.py to learn skills from dataset1, aggregates with server.py,
-and uses generate_server.py to solve problems in dataset2.
+and uses client.py to solve problems in dataset2 with the encyclopedia.
 """
 
 import argparse
 import json
 import os
 import random
-import re
 import time
 from typing import Dict, List, Optional
 
@@ -21,7 +20,7 @@ except ImportError:
     load_dataset = None
 
 from client import ChainOfThoughtReader
-from generate_server import GenerateServer
+from math_datasets.utils import extract_numbers
 from server import SkillAggregationServer
 from server_text import TextBasedSkillAggregationServer
 
@@ -61,7 +60,6 @@ class MathPipeline:
         self.client = None
         self.server = None
         self.server_text = None
-        self.generate_server = None
 
     def load_math_dataset(self, dataset_name: str) -> List[Dict]:
         """
@@ -332,8 +330,7 @@ class MathPipeline:
     ) -> List[Dict]:
         """
         Step 3: Solve problems in dataset2 using learned skills.
-        - Normal mode: Use generate_server.py with GraphRAG encyclopedia
-        - Text mode: Use generate_server.py with text-based encyclopedia.json
+        Uses client.py with encyclopedia loaded.
 
         Returns:
             List of results with predictions
@@ -348,16 +345,17 @@ class MathPipeline:
 
         print(f"Loaded {len(problems)} problems from dataset '{dataset2_name}'")
 
-        # Create generate server instance
-        self.generate_server = GenerateServer(
-            model_name=self.model_name,
-            device=self.device,
-            use_gemini=self.use_gemini,
-            gemini_api_key=self.gemini_api_key,
-            mode=self.mode,  # Pass mode: "normal" or "text"
-        )
+        # Create client instance if not exists
+        if self.client is None:
+            self.client = ChainOfThoughtReader(
+                model_name=self.model_name,
+                device=self.device,
+                use_gemini=self.use_gemini,
+                gemini_api_key=self.gemini_api_key,
+            )
 
-        self.generate_server.load_encyclopedia(encyclopedia_path)
+        # Load encyclopedia using client
+        self.client.load_encyclopedia(encyclopedia_path, mode=self.mode)
 
         # Solve each problem
         results = []
@@ -379,7 +377,7 @@ class MathPipeline:
 
             try:
                 # Generate answer using encyclopedia (is_math=True for math problems)
-                answer = self.generate_server.generate(problem_text, is_math=True)
+                answer = self.client.solve_with_encyclopedia(problem_text, is_math=True)
 
                 # Extract answer from response
                 answer_text = answer
@@ -574,13 +572,7 @@ class MathPipeline:
         Check if predicted answer matches ground truth.
         For math problems, extract final numerical answer and compare.
         """
-
         # Extract numbers from both answers
-        def extract_numbers(text: str) -> List[float]:
-            # Find all numbers (including decimals and negatives)
-            numbers = re.findall(r"-?\d+\.?\d*", text)
-            return [float(n) for n in numbers if n]
-
         pred_nums = extract_numbers(predicted)
         gt_nums = extract_numbers(ground_truth)
 
@@ -786,8 +778,14 @@ if __name__ == "__main__":
         )
         print("\nText mode examples:")
         print("  # Use text-based aggregation (server_text.py) instead of GraphRAG")
-        print("  python math_pipeline.py --mode text --dataset1 aime25 --dataset2 math500")
+        print(
+            "  python math_pipeline.py --mode text --dataset1 aime25 --dataset2 math500"
+        )
         print("  # Start from STEP 2 with text mode")
-        print("  python math_pipeline.py --mode text --start-from-step2 --dataset2 math500")
+        print(
+            "  python math_pipeline.py --mode text --start-from-step2 --dataset2 math500"
+        )
         print("  # Start from STEP 3 with text mode (uses encyclopedia.json)")
-        print("  python math_pipeline.py --mode text --start-from-step3 --dataset2 math500")
+        print(
+            "  python math_pipeline.py --mode text --start-from-step3 --dataset2 math500"
+        )

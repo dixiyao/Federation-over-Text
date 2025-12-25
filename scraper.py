@@ -151,12 +151,12 @@ class OpenReviewScraper:
         # Try to get papers via API endpoint with pagination
         api_url = "https://api.openreview.net/notes"
         papers = []
-        
+
         # Try with smaller limit first to avoid 400 errors
         offset = 0
         limit = 1000  # Reduced from 50000 to avoid API errors
         max_papers_to_fetch = 50000  # Maximum total papers to fetch
-        
+
         try:
             print("Fetching papers from OpenReview API (this may take a while)...")
             while offset < max_papers_to_fetch:
@@ -169,17 +169,19 @@ class OpenReviewScraper:
                 }
 
                 response = self.session.get(api_url, params=params, timeout=60)
-                
+
                 if response.status_code != 200:
-                    print(f"API returned status {response.status_code}, trying web scraping...")
+                    print(
+                        f"API returned status {response.status_code}, trying web scraping..."
+                    )
                     break
-                
+
                 data = response.json()
                 notes = data.get("notes", [])
-                
+
                 if not notes:
                     break  # No more papers
-                
+
                 # Filter for notable papers based on flags
                 batch_count = 0
                 for note in notes:
@@ -212,13 +214,15 @@ class OpenReviewScraper:
                     if should_include:
                         papers.append(note)
                         batch_count += 1
-                
+
                 if batch_count > 0:
-                    print(f"  Fetched {len(notes)} papers, found {batch_count} notable papers (total: {len(papers)})")
-                
+                    print(
+                        f"  Fetched {len(notes)} papers, found {batch_count} notable papers (total: {len(papers)})"
+                    )
+
                 if len(notes) < limit:
                     break  # Last batch
-                
+
                 offset += limit
                 time.sleep(0.5)  # Rate limiting
 
@@ -289,15 +293,15 @@ class OpenReviewScraper:
                 # Try multiple selectors to find paper links
                 # OpenReview uses various structures, so we'll try several
                 paper_links = []
-                
+
                 # Method 1: Look for links with /forum?id=
                 links1 = soup.find_all("a", href=re.compile(r"/forum\?id="))
                 paper_links.extend(links1)
-                
+
                 # Method 2: Look for links with href containing paper IDs (forum pattern)
                 links2 = soup.find_all("a", href=re.compile(r"forum.*id="))
                 paper_links.extend(links2)
-                
+
                 # Method 3: Look for data attributes or IDs that might contain paper IDs
                 # Some pages use data-note-id or similar attributes
                 links3 = soup.find_all(attrs={"data-note-id": True})
@@ -309,15 +313,18 @@ class OpenReviewScraper:
                             def __init__(self, paper_id, title):
                                 self.paper_id = paper_id
                                 self.title = title
+
                             def get(self, key, default=None):
                                 if key == "href":
                                     return f"/forum?id={self.paper_id}"
                                 return default
+
                             def get_text(self, strip=False):
                                 return self.title
+
                         title = elem.get_text(strip=True) or f"Paper_{paper_id}"
                         paper_links.append(PseudoLink(paper_id, title))
-                
+
                 # Method 4: Look for script tags that might contain JSON data with paper info
                 scripts = soup.find_all("script")
                 for script in scripts:
@@ -325,18 +332,26 @@ class OpenReviewScraper:
                     if script_text and "forum" in script_text and "id" in script_text:
                         # Try to extract paper IDs from JavaScript/JSON in script tags
                         # Look for patterns like "id": "..." or id="..."
-                        ids = re.findall(r'["\']id["\']\s*:\s*["\']([^"\']+)["\']', script_text)
+                        ids = re.findall(
+                            r'["\']id["\']\s*:\s*["\']([^"\']+)["\']', script_text
+                        )
                         for paper_id in ids:
-                            if len(paper_id) > 5:  # Filter out short IDs that are likely not paper IDs
+                            if (
+                                len(paper_id) > 5
+                            ):  # Filter out short IDs that are likely not paper IDs
+
                                 class PseudoLink:
                                     def __init__(self, paper_id):
                                         self.paper_id = paper_id
+
                                     def get(self, key, default=None):
                                         if key == "href":
                                             return f"/forum?id={self.paper_id}"
                                         return default
+
                                     def get_text(self, strip=False):
                                         return f"Paper_{self.paper_id}"
+
                                 paper_links.append(PseudoLink(paper_id))
 
                 # Deduplicate paper_links by href
@@ -352,15 +367,19 @@ class OpenReviewScraper:
                 for link in paper_links:
                     href = link.get("href", "")
                     paper_id = None
-                    
+
                     # Extract paper ID from href
                     if "id=" in href:
                         paper_id = href.split("id=")[-1].split("&")[0].split("#")[0]
-                    elif hasattr(link, 'paper_id'):
+                    elif hasattr(link, "paper_id"):
                         paper_id = link.paper_id
-                    
+
                     if paper_id and paper_id not in seen_paper_ids:
-                        title = link.get_text(strip=True) if hasattr(link, 'get_text') else (getattr(link, 'title', None) or f"Paper_{paper_id}")
+                        title = (
+                            link.get_text(strip=True)
+                            if hasattr(link, "get_text")
+                            else (getattr(link, "title", None) or f"Paper_{paper_id}")
+                        )
                         # Apply title filter if specified
                         if title_filter:
                             if title_filter.lower() in title.lower():
@@ -369,7 +388,12 @@ class OpenReviewScraper:
                                         "id": paper_id,
                                         "title": title,
                                         "url": urljoin(
-                                            self.base_url, href if href.startswith("/") else f"/{href}"
+                                            self.base_url,
+                                            (
+                                                href
+                                                if href.startswith("/")
+                                                else f"/{href}"
+                                            ),
                                         ),
                                     }
                                 )
@@ -379,7 +403,10 @@ class OpenReviewScraper:
                                 {
                                     "id": paper_id,
                                     "title": title,
-                                    "url": urljoin(self.base_url, href if href.startswith("/") else f"/{href}"),
+                                    "url": urljoin(
+                                        self.base_url,
+                                        href if href.startswith("/") else f"/{href}",
+                                    ),
                                 }
                             )
                             seen_paper_ids.add(paper_id)

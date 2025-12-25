@@ -23,6 +23,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 try:
     import google.generativeai as genai
+
     HAS_GEMINI = True
 except ImportError:
     HAS_GEMINI = False
@@ -58,9 +59,11 @@ class TextBasedSkillAggregationServer:
                     "google-generativeai is required for Gemini API. Install with: pip install google-generativeai"
                 )
             if not self.gemini_api_key:
-                raise ValueError("Gemini API key is required when use_gemini=True. Set GEMINI_API_KEY env var or pass gemini_api_key parameter.")
+                raise ValueError(
+                    "Gemini API key is required when use_gemini=True. Set GEMINI_API_KEY env var or pass gemini_api_key parameter."
+                )
             genai.configure(api_key=self.gemini_api_key)
-            self.gemini_model = genai.GenerativeModel('gemini-3-pro-preview')
+            self.gemini_model = genai.GenerativeModel("gemini-3-pro-preview")
 
         # Model and tokenizer will be loaded lazily on first use (only for HuggingFace models)
         self.model = None
@@ -112,13 +115,16 @@ class TextBasedSkillAggregationServer:
             raise RuntimeError(f"Failed to load model {self.model_name}: {e}")
 
     def _call_model(
-        self, prompt: str, system_prompt: Optional[str] = None, max_new_tokens: int = 78632
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        max_new_tokens: int = 78632,
     ) -> str:
         """Call the model with a prompt (HuggingFace or Gemini API)"""
         # Use Gemini API if configured
         if self.use_gemini:
             return self._call_gemini(prompt, system_prompt, max_new_tokens)
-        
+
         # Otherwise use HuggingFace model
         self._load_model()
 
@@ -180,9 +186,12 @@ class TextBasedSkillAggregationServer:
 
         except Exception as e:
             raise RuntimeError(f"Error calling model: {e}")
-    
+
     def _call_gemini(
-        self, prompt: str, system_prompt: Optional[str] = None, max_new_tokens: Optional[int] = None
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        max_new_tokens: Optional[int] = None,
     ) -> str:
         """Call Gemini API"""
         try:
@@ -191,49 +200,62 @@ class TextBasedSkillAggregationServer:
                 full_prompt = f"{system_prompt}\n\n{prompt}"
             else:
                 full_prompt = prompt
-            
+
             # Configure generation parameters - use Gemini defaults, only set max_output_tokens
             generation_config = {}
             if max_new_tokens:
                 generation_config["max_output_tokens"] = max_new_tokens
-            
+
             # Generate response
             if generation_config:
                 response = self.gemini_model.generate_content(
-                    full_prompt,
-                    generation_config=generation_config
+                    full_prompt, generation_config=generation_config
                 )
             else:
                 response = self.gemini_model.generate_content(full_prompt)
-            
+
             # Handle response safely - check for blocked/filtered content
             if not response.candidates:
-                raise RuntimeError("Gemini API returned no candidates. Response may have been blocked.")
-            
+                raise RuntimeError(
+                    "Gemini API returned no candidates. Response may have been blocked."
+                )
+
             candidate = response.candidates[0]
             if candidate.finish_reason == 2:  # MAX_TOKENS
                 # Hit token limit, but try to get partial text
                 if candidate.content and candidate.content.parts:
-                    text_parts = [part.text for part in candidate.content.parts if hasattr(part, 'text') and part.text]
+                    text_parts = [
+                        part.text
+                        for part in candidate.content.parts
+                        if hasattr(part, "text") and part.text
+                    ]
                     if text_parts:
                         return "\n".join(text_parts).strip()
-                raise RuntimeError("Gemini API hit token limit and no text was returned.")
+                raise RuntimeError(
+                    "Gemini API hit token limit and no text was returned."
+                )
             elif candidate.finish_reason == 3:  # SAFETY
-                raise RuntimeError("Gemini API blocked the response due to safety filters.")
+                raise RuntimeError(
+                    "Gemini API blocked the response due to safety filters."
+                )
             elif candidate.finish_reason == 4:  # RECITATION
                 raise RuntimeError("Gemini API blocked the response due to recitation.")
-            
+
             # Try to get text from response
             try:
                 return response.text.strip()
             except ValueError as e:
                 # If response.text fails, try to extract from parts manually
                 if candidate.content and candidate.content.parts:
-                    text_parts = [part.text for part in candidate.content.parts if hasattr(part, 'text') and part.text]
+                    text_parts = [
+                        part.text
+                        for part in candidate.content.parts
+                        if hasattr(part, "text") and part.text
+                    ]
                     if text_parts:
                         return "\n".join(text_parts).strip()
                 raise RuntimeError(f"Failed to extract text from Gemini response: {e}")
-            
+
         except Exception as e:
             raise RuntimeError(f"Error calling Gemini API: {e}")
 
@@ -308,11 +330,19 @@ class TextBasedSkillAggregationServer:
                 elif isinstance(data, dict) and not skill_book_raw:
                     # Check if data itself is a skill book (direct format from client.py)
                     # If all keys start with "skill_" or most keys are strings with descriptions
-                    skill_keys = [k for k in data.keys() if isinstance(k, str) and k.startswith("skill_")]
+                    skill_keys = [
+                        k
+                        for k in data.keys()
+                        if isinstance(k, str) and k.startswith("skill_")
+                    ]
                     if len(skill_keys) > 0 and len(skill_keys) >= len(data) * 0.8:
                         # This is likely a direct skill book dictionary
                         skill_book = data
-                    elif all(isinstance(v, str) and len(v) > 20 for v in data.values() if isinstance(v, str)):
+                    elif all(
+                        isinstance(v, str) and len(v) > 20
+                        for v in data.values()
+                        if isinstance(v, str)
+                    ):
                         # All values are strings (likely descriptions), treat as skill book
                         skill_book = data
 
@@ -365,10 +395,9 @@ class TextBasedSkillAggregationServer:
 
         return step_result
 
-
     def _get_text_profiling_prompt(self, skill_store: Dict) -> str:
         """Step 2: Prompt for text-based profiling of skill relationships
-        
+
         Based on research in hierarchical skill learning, skill composition, and knowledge graphs.
         References:
         - Generalizable Hierarchical Skill Learning (GSL): Object-centric skill primitives
@@ -376,10 +405,7 @@ class TextBasedSkillAggregationServer:
         - Knowledge Graph approaches: Relationship mapping and ontology construction
         """
         skills_text = "\n".join(
-            [
-                f"- {name}: {desc}"
-                for name, desc in skill_store.items()
-            ]
+            [f"- {name}: {desc}" for name, desc in skill_store.items()]
         )
 
         prompt = f"""
@@ -483,7 +509,7 @@ Analyze these skills and build a profiling of their relationships:
         self, skill_store: Dict, profiling: Dict, existing_encyclopedia: str = ""
     ) -> str:
         """Step 3: Prompt for extracting general, fundamental knowledge
-        
+
         Based on research in:
         - Knowledge Distillation: Extracting higher-level abstractions
         - Hierarchical Skill Learning: Multi-level skill organization
@@ -491,28 +517,28 @@ Analyze these skills and build a profiling of their relationships:
         - Skill Composition: Creating composable, reusable skills
         - Anthropic Skills: Composable, portable skill structure
         """
-        
+
         # Format clusters
         clusters_text = ""
         if isinstance(profiling, dict) and "clusters" in profiling:
-            clusters_text = "\n".join([
-                f"- Cluster {cluster.get('cluster_id', '?')} ({cluster.get('cluster_name', 'unnamed')}): "
-                f"{', '.join(cluster.get('skills', []))}"
-                for cluster in profiling["clusters"]
-            ])
+            clusters_text = "\n".join(
+                [
+                    f"- Cluster {cluster.get('cluster_id', '?')} ({cluster.get('cluster_name', 'unnamed')}): "
+                    f"{', '.join(cluster.get('skills', []))}"
+                    for cluster in profiling["clusters"]
+                ]
+            )
 
         # Sample of original skills (for reference) - showing all skills
-        sample_skills = "\n".join([
-            f"- {name}: {desc}"
-            for name, desc in skill_store.items()
-        ])
+        sample_skills = "\n".join(
+            [f"- {name}: {desc}" for name, desc in skill_store.items()]
+        )
 
         # Format all skills from skill_store (for reference)
-        all_skills_text = "\n".join([
-            f"{name}: {desc}"
-            for name, desc in skill_store.items()
-        ])
-        
+        all_skills_text = "\n".join(
+            [f"{name}: {desc}" for name, desc in skill_store.items()]
+        )
+
         # Include full previous encyclopedia if available
         previous_encyclopedia_text = ""
         if existing_encyclopedia:
@@ -873,10 +899,10 @@ Output a simple JSON object with skill names as keys and descriptions as string 
         print("\n" + "=" * 80)
         print("STEP 3: Extracting General, Fundamental Knowledge")
         print("=" * 80)
-        
+
         # Load existing encyclopedia if available
         existing_encyclopedia = self._load_existing_encyclopedia(output_dir)
-        
+
         extraction_result = self._step_knowledge_extraction(
             self.skill_store,
             self.skill_relationships,
@@ -968,8 +994,11 @@ if __name__ == "__main__":
 
     # Create server
     server = TextBasedSkillAggregationServer(
-        model_name=args.model, device=args.device, input_dir=args.input_dir,
-        use_gemini=args.use_gemini, gemini_api_key=args.gemini_api_key
+        model_name=args.model,
+        device=args.device,
+        input_dir=args.input_dir,
+        use_gemini=args.use_gemini,
+        gemini_api_key=args.gemini_api_key,
     )
 
     try:
@@ -995,4 +1024,3 @@ if __name__ == "__main__":
         print("1. Installed required packages: pip install -r requirements.txt")
         print("2. Skill JSON files in the input directory")
         print("3. For GPU support, ensure CUDA is properly installed")
-

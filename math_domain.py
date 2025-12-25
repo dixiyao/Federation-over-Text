@@ -73,6 +73,7 @@ except ImportError:
     load_dataset = None
 
 from client import ChainOfThoughtReader
+from math_datasets.utils import extract_numbers
 from server import SkillAggregationServer
 from server_text import TextBasedSkillAggregationServer
 
@@ -105,7 +106,12 @@ DATASET_REGISTRY: Dict[str, Tuple[str, str, Optional[str], Optional[str]]] = {
     "imo_answerbench": ("csv", "math_datasets/answerbench.csv", None, None),
     "imo_answerbench_algebra": ("csv", "math_datasets/imo_algebra.csv", None, None),
     "imo_answerbench_geometry": ("csv", "math_datasets/imo_geometry.csv", None, None),
-    "imo_answerbench_number_theory": ("csv", "math_datasets/imo_number_theory.csv", None, None),
+    "imo_answerbench_number_theory": (
+        "csv",
+        "math_datasets/imo_number_theory.csv",
+        None,
+        None,
+    ),
     # IMO-ProofBench: Requires external evaluation (ProofAutoGrader or human experts)
     "imo_proofbench": ("csv", "math_datasets/proofbench.csv", None, None),
     # IMO-GradingBench: For training/evaluating automatic graders
@@ -123,7 +129,6 @@ class MathDomainPipeline:
         gemini_api_key: Optional[str] = None,
         mode: str = "text",
         num_iterations: int = 3,
-        iterative: bool = True,  # Always iterative mode
     ):
         self.model_name = model_name
         self.device = device
@@ -144,9 +149,13 @@ class MathDomainPipeline:
     # ------------------------------------------------------------------
     # Dataset loading helpers
     # ------------------------------------------------------------------
-    def _load_local_json(self, dataset_name: str, explicit_path: Optional[str]) -> List[Dict]:
+    def _load_local_json(
+        self, dataset_name: str, explicit_path: Optional[str]
+    ) -> List[Dict]:
         """Load a dataset from a local JSON file."""
-        candidate_path = explicit_path or os.path.join("math_datasets", f"{dataset_name}.json")
+        candidate_path = explicit_path or os.path.join(
+            "math_datasets", f"{dataset_name}.json"
+        )
         if not os.path.exists(candidate_path):
             raise FileNotFoundError(
                 f"Dataset '{dataset_name}' not found. Provide {candidate_path} or update DATASET_REGISTRY."
@@ -155,53 +164,64 @@ class MathDomainPipeline:
             data = json.load(f)
         return data
 
-    def _load_csv_file(self, dataset_name: str, explicit_path: Optional[str]) -> List[Dict]:
+    def _load_csv_file(
+        self, dataset_name: str, explicit_path: Optional[str]
+    ) -> List[Dict]:
         """Load a dataset from a CSV file.
-        
+
         Tries to infer column names from common patterns:
         - Problem: problem, question, problem_text, task, statement
         - Answer: answer, solution, final_answer, answer_text
         - ID: id, problem_id, num, number
         """
-        candidate_path = explicit_path or os.path.join("math_datasets", f"{dataset_name}.csv")
+        candidate_path = explicit_path or os.path.join(
+            "math_datasets", f"{dataset_name}.csv"
+        )
         if not os.path.exists(candidate_path):
             raise FileNotFoundError(
                 f"CSV file for dataset '{dataset_name}' not found at {candidate_path}"
             )
-        
+
         print(f"Loading CSV file from {candidate_path}...")
         with open(candidate_path, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             if reader.fieldnames is None:
                 raise ValueError(f"CSV file {candidate_path} is empty or has no header")
-            
+
             fieldnames_lower = [fn.lower() for fn in reader.fieldnames]
             print(f"CSV columns: {reader.fieldnames}")
-            
+
             # Map CSV columns to standard schema
-            problem_cols = ["problem", "question", "problem_text", "task", "statement", "text"]
+            problem_cols = [
+                "problem",
+                "question",
+                "problem_text",
+                "task",
+                "statement",
+                "text",
+            ]
             answer_cols = ["answer", "solution", "final_answer", "answer_text"]
             id_cols = ["id", "problem_id", "num", "number", "idx"]
-            
+
             problem_col = None
             answer_col = None
-            id_col = None
-            
+            id_col = None  # Reserved for future ID column mapping
+
             for col in problem_cols:
                 if col in fieldnames_lower:
                     problem_col = reader.fieldnames[fieldnames_lower.index(col)]
                     break
-            
+
             for col in answer_cols:
                 if col in fieldnames_lower:
                     answer_col = reader.fieldnames[fieldnames_lower.index(col)]
                     break
-            
+
             for col in id_cols:
                 if col in fieldnames_lower:
                     id_col = reader.fieldnames[fieldnames_lower.index(col)]
                     break
-            
+
             if not problem_col:
                 raise ValueError(
                     f"Could not find problem column in CSV. Available columns: {reader.fieldnames}. "
@@ -212,16 +232,19 @@ class MathDomainPipeline:
                     f"Could not find answer column in CSV. Available columns: {reader.fieldnames}. "
                     f"Expected one of: {answer_cols}"
                 )
-            
+
             data = []
             for row_idx, row in enumerate(reader, 1):
                 data.append(row)
-            
+
             print(f"Loaded {len(data)} rows from CSV")
             return data
 
-    def _normalize_problems(self, raw_problems: List[Dict], dataset_name: str) -> List[Dict]:
+    def _normalize_problems(
+        self, raw_problems: List[Dict], dataset_name: str
+    ) -> List[Dict]:
         """Ensure a consistent schema across sources."""
+
         # Helper to find field from problem dict with multiple possible names
         def get_field(obj: Dict, candidates: List[str], default: str = "") -> str:
             for candidate in candidates:
@@ -230,20 +253,21 @@ class MathDomainPipeline:
                         val = obj[key]
                         return str(val) if val is not None else default
             return default
-        
+
         normalized = []
         for idx, problem in enumerate(raw_problems):
             # Try various column name combinations (case-insensitive)
-            problem_text = get_field(problem, [
-                "problem", "question", "problem_text", "task", "statement", "text"
-            ])
-            answer_text = get_field(problem, [
-                "answer", "solution", "final_answer", "answer_text"
-            ])
-            id_val = get_field(problem, [
-                "id", "problem_id", "num", "number", "idx"
-            ], str(idx + 1))
-            
+            problem_text = get_field(
+                problem,
+                ["problem", "question", "problem_text", "task", "statement", "text"],
+            )
+            answer_text = get_field(
+                problem, ["answer", "solution", "final_answer", "answer_text"]
+            )
+            id_val = get_field(
+                problem, ["id", "problem_id", "num", "number", "idx"], str(idx + 1)
+            )
+
             normalized_problem = {
                 "id": int(id_val) if id_val.isdigit() else id_val,
                 "problem": problem_text,
@@ -339,18 +363,22 @@ class MathDomainPipeline:
             )
 
     def _extract_skills_for_dataset(
-        self, dataset_name: str, problems: List[Dict], max_problems: Optional[int],
-        encyclopedia_path: Optional[str] = None, iteration: int = 0
+        self,
+        dataset_name: str,
+        problems: List[Dict],
+        max_problems: Optional[int],
+        encyclopedia_path: Optional[str] = None,
+        iteration: int = 0,
     ) -> Tuple[str, List[Dict]]:
         """Extract skills from dataset, optionally solving with encyclopedia first.
-        
+
         Args:
             dataset_name: Name of dataset
             problems: List of problems
             max_problems: Max problems to process
             encyclopedia_path: If provided, solve with encyclopedia before extracting skills
             iteration: Current iteration number (for logging)
-            
+
         Returns:
             Tuple of (skills_dir, results_list)
         """
@@ -359,8 +387,10 @@ class MathDomainPipeline:
         os.makedirs(skills_dir, exist_ok=True)
 
         worklist = problems[:max_problems] if max_problems else problems
-        print(f"\nIteration {iteration}: Extracting skills for {dataset_name} ({len(worklist)} problems)...")
-        
+        print(
+            f"\nIteration {iteration}: Extracting skills for {dataset_name} ({len(worklist)} problems)..."
+        )
+
         # If encyclopedia provided, load it into client for solving
         results = []
         if encyclopedia_path and os.path.exists(encyclopedia_path):
@@ -371,19 +401,23 @@ class MathDomainPipeline:
             self.encyclopedia_loaded = False
 
         for idx, problem_data in enumerate(worklist, 1):
-            problem_text = problem_data.get("problem") or problem_data.get("question", "")
+            problem_text = problem_data.get("problem") or problem_data.get(
+                "question", ""
+            )
             if not problem_text:
                 print(f"  [skip] Problem {idx} missing text")
                 continue
 
             print(f"  [{idx}/{len(worklist)}] {problem_text[:80]}...")
-            
+
             # Solve with encyclopedia if loaded
             predicted_answer = None
             is_correct = False
             if self.encyclopedia_loaded:
                 try:
-                    answer = self.client.solve_with_encyclopedia(problem_text, is_math=True)
+                    answer = self.client.solve_with_encyclopedia(
+                        problem_text, is_math=True
+                    )
                     answer_text = answer
                     if "## Answer:" in answer:
                         start_idx = answer.find("## Answer:") + len("## Answer:")
@@ -392,37 +426,47 @@ class MathDomainPipeline:
                             end_idx = len(answer)
                         answer_text = answer[start_idx:end_idx].strip()
                     predicted_answer = answer_text
-                    
-                    ground_truth = problem_data.get("answer") or problem_data.get("solution", "")
+
+                    ground_truth = problem_data.get("answer") or problem_data.get(
+                        "solution", ""
+                    )
                     is_correct = self._check_answer_match(
                         predicted_answer, ground_truth, dataset_name
                     )
                     status = "✓" if is_correct else "✗"
-                    print(f"    {status} Predicted: {predicted_answer[:50]}... | GT: {ground_truth[:50]}...")
+                    print(
+                        f"    {status} Predicted: {predicted_answer[:50]}... | GT: {ground_truth[:50]}..."
+                    )
                 except Exception as exc:
                     print(f"    Error solving: {exc}")
-            
+
             # Even without encyclopedia in iteration 1, track that we attempted
             # This ensures all iterations have unified result tracking
             if not self.encyclopedia_loaded:
-                ground_truth = problem_data.get("answer") or problem_data.get("solution", "")
+                ground_truth = problem_data.get("answer") or problem_data.get(
+                    "solution", ""
+                )
                 predicted_answer = ""  # No prediction without encyclopedia
                 is_correct = False
-                results.append({
-                    "dataset": dataset_name,
-                    "problem_id": problem_data.get("id", idx),
-                    "predicted_answer": predicted_answer,
-                    "ground_truth": ground_truth,
-                    "is_correct": is_correct,
-                })
-            
+                results.append(
+                    {
+                        "dataset": dataset_name,
+                        "problem_id": problem_data.get("id", idx),
+                        "predicted_answer": predicted_answer,
+                        "ground_truth": ground_truth,
+                        "is_correct": is_correct,
+                    }
+                )
+
             # Extract skills
             try:
                 result = self.client.read_paper(task=problem_text, paper_content=None)
                 skill_book = result.get("behavior_book", {})
                 if skill_book:
                     skill_book = {
-                        k: v for k, v in skill_book.items() if not k.startswith("skill_fallback")
+                        k: v
+                        for k, v in skill_book.items()
+                        if not k.startswith("skill_fallback")
                     }
                 if not skill_book:
                     print("    No skills extracted")
@@ -433,20 +477,25 @@ class MathDomainPipeline:
                     "problem_id": problem_data.get("id", idx),
                     "behavior_book": skill_book,
                     "iteration": iteration,
-                    "predicted_answer": predicted_answer if predicted_answer is not None else "",
-                    "ground_truth": problem_data.get("answer") or problem_data.get("solution", ""),
+                    "predicted_answer": (
+                        predicted_answer if predicted_answer is not None else ""
+                    ),
+                    "ground_truth": problem_data.get("answer")
+                    or problem_data.get("solution", ""),
                     "is_correct": is_correct,
                 }
                 # Only add to results if not already added above (for iteration 1 case)
                 if predicted_answer is not None and self.encyclopedia_loaded:
-                    results.append({
-                        "dataset": dataset_name,
-                        "problem_id": problem_data.get("id", idx),
-                        "predicted_answer": predicted_answer,
-                        "ground_truth": output_data["ground_truth"],
-                        "is_correct": is_correct,
-                    })
-                
+                    results.append(
+                        {
+                            "dataset": dataset_name,
+                            "problem_id": problem_data.get("id", idx),
+                            "predicted_answer": predicted_answer,
+                            "ground_truth": output_data["ground_truth"],
+                            "is_correct": is_correct,
+                        }
+                    )
+
                 output_path = os.path.join(skills_dir, f"problem_{idx:04d}.json")
                 with open(output_path, "w", encoding="utf-8") as f:
                     json.dump(output_data, f, indent=2, ensure_ascii=False)
@@ -454,15 +503,18 @@ class MathDomainPipeline:
                 time.sleep(0.5)
             except Exception as exc:  # noqa: BLE001
                 print(f"    Error processing problem {idx}: {exc}")
-        
+
         return skills_dir, results
 
     def learn_skills_from_datasets(
-        self, dataset_names: List[str], max_problems: Optional[int],
-        encyclopedia_path: Optional[str] = None, iteration: int = 0
+        self,
+        dataset_names: List[str],
+        max_problems: Optional[int],
+        encyclopedia_path: Optional[str] = None,
+        iteration: int = 0,
     ) -> Tuple[Dict[str, str], List[Dict]]:
         """Learn skills from datasets, optionally solving with encyclopedia first.
-        
+
         Returns:
             Tuple of (skills_map, all_results)
         """
@@ -478,24 +530,24 @@ class MathDomainPipeline:
             )
             skills_map[name] = skills_dir
             all_results.extend(results)
-        
+
         print("\nFinished STEP 1 across datasets:")
         for name, path in skills_map.items():
             print(f"  - {name}: {path}")
-        
+
         if all_results:
             num_correct = sum(1 for r in all_results if r["is_correct"])
             accuracy = num_correct / len(all_results) if all_results else 0.0
-            print(f"\nIteration {iteration} Accuracy: {num_correct}/{len(all_results)} = {accuracy:.2%}")
-        
+            print(
+                f"\nIteration {iteration} Accuracy: {num_correct}/{len(all_results)} = {accuracy:.2%}"
+            )
+
         return skills_map, all_results
 
     # ------------------------------------------------------------------
     # STEP 2: Aggregate chosen skills into one encyclopedia
     # ------------------------------------------------------------------
-    def aggregate_skills(
-        self, skill_sets: List[str], r1: float, r2: float
-    ) -> str:
+    def aggregate_skills(self, skill_sets: List[str], r1: float, r2: float) -> str:
         if not skill_sets:
             raise ValueError("Provide at least one dataset to aggregate in STEP 2.")
 
@@ -503,7 +555,9 @@ class MathDomainPipeline:
         for name in skill_sets:
             skills_dir = os.path.join(self.output_dir, name)
             if not os.path.isdir(skills_dir):
-                raise FileNotFoundError(f"Skills directory not found for {name}: {skills_dir}")
+                raise FileNotFoundError(
+                    f"Skills directory not found for {name}: {skills_dir}"
+                )
             dataset_files = [
                 os.path.join(skills_dir, f)
                 for f in os.listdir(skills_dir)
@@ -566,60 +620,60 @@ class MathDomainPipeline:
         r2: float = 0.4,
     ) -> Dict:
         """Run iterative learning pipeline.
-        
+
         Each iteration:
         1. Use encyclopedia (from previous iteration) to solve problems and log accuracy
         2. Extract skills from the same problems
         3. Aggregate skills into new encyclopedia
         4. Repeat
-        
+
         Args:
             dataset_list: List of datasets to train on
             max_problems: Max problems per dataset
             r1: Similarity threshold for aggregation
             r2: Similarity threshold for aggregation
-            
+
         Returns:
             Summary dict with iteration history
         """
         if not dataset_list:
             raise ValueError("Provide at least one dataset for iterative learning")
-        
+
         start_time = time.time()
         iteration_history = []
         encyclopedia_path = None
-        
+
         print(f"\n{'='*80}")
         print(f"Starting Iterative Learning Pipeline: {self.num_iterations} iterations")
         print(f"Datasets: {', '.join(dataset_list)}")
         print(f"Max problems per dataset: {max_problems or 'all'}")
         print(f"{'='*80}\n")
-        
+
         for iteration in range(1, self.num_iterations + 1):
             print(f"\n{'='*80}")
             print(f"ITERATION {iteration}/{self.num_iterations}")
             print(f"{'='*80}")
-            
+
             # STEP 1: Extract skills (and solve if encyclopedia exists)
             skills_map, results = self.learn_skills_from_datasets(
                 dataset_list, max_problems, encyclopedia_path, iteration
             )
-            
+
             # Calculate accuracy for this iteration
             accuracy = 0.0
             num_correct = 0
             if results:
                 num_correct = sum(1 for r in results if r["is_correct"])
                 accuracy = num_correct / len(results)
-            
+
             # STEP 2: Aggregate skills into encyclopedia
             print(f"\nIteration {iteration}: Aggregating skills...")
             encyclopedia_path = self.aggregate_skills(dataset_list, r1=r1, r2=r2)
-            
+
             # Save iteration results
             iteration_dir = os.path.join(self.output_dir, f"iteration_{iteration}")
             os.makedirs(iteration_dir, exist_ok=True)
-            
+
             iteration_summary = {
                 "iteration": iteration,
                 "datasets": dataset_list,
@@ -629,20 +683,25 @@ class MathDomainPipeline:
                 "encyclopedia_path": encyclopedia_path,
             }
             iteration_history.append(iteration_summary)
-            
+
             # Save iteration results
             iteration_results_path = os.path.join(iteration_dir, "results.json")
             with open(iteration_results_path, "w", encoding="utf-8") as f:
-                json.dump({
-                    "summary": iteration_summary,
-                    "results": results,
-                }, f, indent=2, ensure_ascii=False)
-            
+                json.dump(
+                    {
+                        "summary": iteration_summary,
+                        "results": results,
+                    },
+                    f,
+                    indent=2,
+                    ensure_ascii=False,
+                )
+
             print(f"\nIteration {iteration} Summary:")
             print(f"  Accuracy: {num_correct}/{len(results)} = {accuracy:.2%}")
             print(f"  Encyclopedia: {encyclopedia_path}")
             print(f"  Results saved: {iteration_results_path}")
-        
+
         # Final summary
         final_summary = {
             "mode": "iterative",
@@ -651,11 +710,11 @@ class MathDomainPipeline:
             "iteration_history": iteration_history,
             "total_time_seconds": time.time() - start_time,
         }
-        
+
         summary_path = os.path.join(self.output_dir, "iterative_summary.json")
         with open(summary_path, "w", encoding="utf-8") as f:
             json.dump(final_summary, f, indent=2, ensure_ascii=False)
-        
+
         print(f"\n{'='*80}")
         print("ITERATIVE LEARNING COMPLETE")
         print(f"{'='*80}")
@@ -663,89 +722,93 @@ class MathDomainPipeline:
         for iter_sum in iteration_history:
             print(f"  Iteration {iter_sum['iteration']}: {iter_sum['accuracy']:.2%}")
         print(f"\nFinal summary saved: {summary_path}")
-        
+
         return final_summary
 
     # ------------------------------------------------------------------
     # Orchestration
     # ------------------------------------------------------------------
-    def _check_answer_match(self, predicted: str, ground_truth: str, dataset_name: Optional[str] = None) -> bool:
+    def _check_answer_match(
+        self, predicted: str, ground_truth: str, dataset_name: Optional[str] = None
+    ) -> bool:
         """Check if predicted answer matches ground truth.
-        
+
         For standard datasets (AIME, MATH500, GSM8K): numeric/string comparison
         For IMOBench datasets: uses symbolic comparison and handles algebraic equivalence
-        
+
         Args:
             predicted: Predicted answer
             ground_truth: Ground truth answer
             dataset_name: Dataset name to determine evaluation strategy
-            
+
         Returns:
             True if answers match
         """
         if not predicted or not ground_truth:
             return False
-        
+
         # For IMOBench datasets, use more sophisticated symbolic evaluation
         if dataset_name and dataset_name.startswith("imo"):
             return self._check_imo_answer(predicted, ground_truth)
-        
+
         # Standard numeric/string comparison for other datasets
-        def extract_numbers(text: str) -> List[float]:
-            numbers = re.findall(r"-?\d+\.?\d*", text)
-            return [float(n) for n in numbers if n]
 
         pred_nums = extract_numbers(predicted)
         gt_nums = extract_numbers(ground_truth)
-        
+
         # If no numbers found, do string comparison
         if not pred_nums or not gt_nums:
             return predicted.strip().lower() == ground_truth.strip().lower()
-        
+
         # Check if any predicted number matches any ground truth number
         return any(abs(p - g) < 1e-6 for p in pred_nums for g in gt_nums)
-    
+
     def _check_imo_answer(self, predicted: str, ground_truth: str) -> bool:
         """Evaluate IMOBench answers with symbolic/algebraic comparison.
-        
+
         IMOBench answers may be:
         - Single numbers/expressions (from IMO-AnswerBench)
         - Multi-step solutions (from IMO-ProofBench)
         - Boolean/classification (from IMO-GradingBench)
-        
+
         This implements basic symbolic comparison and normalization.
         """
         pred = predicted.strip()
         truth = ground_truth.strip()
-        
+
         if not pred or not truth:
             return False
-        
+
         # Exact match (case-insensitive)
         if pred.lower() == truth.lower():
             return True
-        
+
         # Normalize common variations
         # Remove common suffixes
-        suffixes = [" degrees", "°", " radians", " rad", " units", " cm", " m", " inches"]
+        suffixes = [
+            " degrees",
+            "°",
+            " radians",
+            " rad",
+            " units",
+            " cm",
+            " m",
+            " inches",
+        ]
         pred_norm = pred.lower()
         truth_norm = truth.lower()
-        
+
         for suffix in suffixes:
             pred_norm = pred_norm.replace(suffix.lower(), "")
             truth_norm = truth_norm.replace(suffix.lower(), "")
-        
+
         if pred_norm.strip() == truth_norm.strip():
             return True
-        
+
         # Extract numeric parts for numeric comparison
-        def extract_numbers(text: str) -> List[float]:
-            numbers = re.findall(r"-?\d+\.?\d*", text)
-            return [float(n) for n in numbers if n]
-        
         pred_nums = extract_numbers(pred)
         truth_nums = extract_numbers(truth)
-        
+
         # If both have numbers, compare numerically
         if pred_nums and truth_nums:
             # Check exact match or close approximate match
@@ -754,21 +817,19 @@ class MathDomainPipeline:
             # Also try single number comparison
             if len(pred_nums) == 1 and len(truth_nums) == 1:
                 return abs(pred_nums[0] - truth_nums[0]) < 1e-6
-        
+
         # Check if one answer is substring of other (for partial matches)
         # This helps with cases like "42 or 43" vs "42"
         if pred_norm in truth_norm or truth_norm in pred_norm:
             return True
-        
+
         return False
-
-
-
 
 
 # ----------------------------------------------------------------------
 # CLI
 # ----------------------------------------------------------------------
+
 
 def _parse_list_arg(raw: Optional[List[str]]) -> Optional[List[str]]:
     if raw is None:
@@ -794,7 +855,7 @@ def main():
         "--max-problems",
         type=int,
         default=None,
-        help="Limit problems per dataset per iteration."
+        help="Limit problems per dataset per iteration.",
     )
     parser.add_argument(
         "-m",
@@ -803,13 +864,29 @@ def main():
         default="deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
         help="Model name (HF).",
     )
-    parser.add_argument("-d", "--device", type=str, default=None, help="Device to use (cuda or cpu).")
-    parser.add_argument("-o", "--output-dir", type=str, default="math_output", help="Root output directory.")
-    parser.add_argument("--r1", type=float, default=0.95, help="r1 threshold for same skills.")
-    parser.add_argument("--r2", type=float, default=0.6, help="r2 threshold for linked skills.")
+    parser.add_argument(
+        "-d", "--device", type=str, default=None, help="Device to use (cuda or cpu)."
+    )
+    parser.add_argument(
+        "-o",
+        "--output-dir",
+        type=str,
+        default="math_output",
+        help="Root output directory.",
+    )
+    parser.add_argument(
+        "--r1", type=float, default=0.95, help="r1 threshold for same skills."
+    )
+    parser.add_argument(
+        "--r2", type=float, default=0.6, help="r2 threshold for linked skills."
+    )
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
-    parser.add_argument("--use-gemini", action="store_true", help="Use Google Gemini API.")
-    parser.add_argument("--gemini-api-key", type=str, default=None, help="Gemini API key.")
+    parser.add_argument(
+        "--use-gemini", action="store_true", help="Use Google Gemini API."
+    )
+    parser.add_argument(
+        "--gemini-api-key", type=str, default=None, help="Gemini API key."
+    )
     parser.add_argument(
         "--mode",
         type=str,
@@ -866,9 +943,15 @@ def main():
 
         traceback.print_exc()
         print("\nExamples:")
-        print("  python math_domain.py --datasets aime25 --max-problems 10 --num-iterations 3")
-        print("  python math_domain.py --datasets gsm8k math500 --max-problems 20 --mode text")
-        print("  python math_domain.py --datasets imo_answerbench --max-problems 30 --num-iterations 5")
+        print(
+            "  python math_domain.py --datasets aime25 --max-problems 10 --num-iterations 3"
+        )
+        print(
+            "  python math_domain.py --datasets gsm8k math500 --max-problems 20 --mode text"
+        )
+        print(
+            "  python math_domain.py --datasets imo_answerbench --max-problems 30 --num-iterations 5"
+        )
 
 
 if __name__ == "__main__":
