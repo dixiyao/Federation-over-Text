@@ -51,6 +51,11 @@ class ChainOfThoughtReader:
         )
         self.behavior_book = {}  # Store extracted behaviors
         
+        # Encyclopedia support (for solving with learned skills)
+        self.encyclopedia = ""
+        self.encyclopedia_dict = {}
+        self.encyclopedia_loaded = False
+        
         # Gemini API support
         self.use_gemini = use_gemini
         self.gemini_api_key = gemini_api_key or os.getenv("GEMINI_API_KEY")
@@ -315,6 +320,95 @@ class ChainOfThoughtReader:
             
         except Exception as e:
             raise RuntimeError(f"Error calling Gemini API: {e}")
+
+    def load_encyclopedia(self, encyclopedia_path: str, mode: str = "text"):
+        """Load encyclopedia for solving problems with learned skills.
+        
+        Args:
+            encyclopedia_path: Path to encyclopedia file
+            mode: "text" for encyclopedia.json or "normal" for encyclopedia.txt
+        """
+        try:
+            if mode == "text":
+                # Text mode: Load encyclopedia.json
+                with open(encyclopedia_path, "r", encoding="utf-8") as f:
+                    self.encyclopedia_dict = json.load(f)
+                self.encyclopedia = json.dumps(self.encyclopedia_dict, indent=2)
+                print(f"Loaded encyclopedia.json from {encyclopedia_path} ({len(self.encyclopedia_dict)} skills)")
+            else:
+                # Normal mode: Load encyclopedia.txt
+                with open(encyclopedia_path, "r", encoding="utf-8") as f:
+                    self.encyclopedia = f.read()
+                print(f"Loaded encyclopedia from {encyclopedia_path} ({len(self.encyclopedia)} characters)")
+            
+            self.encyclopedia_loaded = True
+        except Exception as e:
+            raise FileNotFoundError(f"Failed to load encyclopedia from {encyclopedia_path}: {e}")
+
+    def solve_with_encyclopedia(self, problem: str, is_math: bool = True) -> str:
+        """Solve a problem using the loaded encyclopedia.
+        
+        Args:
+            problem: The problem to solve
+            is_math: Whether this is a math problem
+            
+        Returns:
+            Generated solution with answer
+        """
+        if not self.encyclopedia_loaded:
+            raise ValueError("Encyclopedia not loaded. Call load_encyclopedia() first.")
+        
+        # Format skills from encyclopedia
+        if self.encyclopedia_dict:
+            # Text mode: Format from dictionary
+            skills_list = []
+            for skill_name, skill_desc in self.encyclopedia_dict.items():
+                skills_list.append(f"**{skill_name}**:\\n{skill_desc}")
+            skills_text = "\\n\\n".join(skills_list)
+        else:
+            # Normal mode: Use raw encyclopedia text
+            skills_text = self.encyclopedia
+        
+        skills_section = f"""Skills Encyclopedia:
+
+{skills_text}
+
+---
+"""
+        
+        # Build prompt similar to generate_server's format
+        if is_math:
+            user_prompt = f"""{skills_section}Problem: {problem}
+
+Please reason step by step using the relevant skills above. Follow the step-by-step instructions in each skill. Put your final answer within \\\\boxed{{}}.
+
+<think>
+"""
+        else:
+            user_prompt = f"""{skills_section}Query: {problem}
+
+Based on the relevant skills above, provide a clear and comprehensive answer to the query. Follow the step-by-step instructions in each skill when applicable. Reference specific skills, categories, or techniques when relevant.
+
+<think>
+"""
+        
+        # Call the model
+        response = self._call_model(user_prompt, system_prompt=None, max_new_tokens=32768)
+        
+        # Format response with answer markers
+        if "## Answer:" not in response:
+            # Extract answer if present (look for boxed answer or final line)
+            answer_match = re.search(r"\\\\boxed\\{([^}]+)\\}", response)
+            if answer_match:
+                answer = answer_match.group(1)
+                response = f"{response}\\n\\n## Answer:\\n{answer}\\n## End of Answer:"
+            else:
+                # Try to find answer at the end
+                lines = response.strip().split("\\n")
+                if lines:
+                    response = f"{response}\\n\\n## Answer:\\n{lines[-1]}\\n## End of Answer:"
+        
+        return response
 
     def _get_solution_prompt(self, problem: str) -> str:
         """Get the Solution Prompt as defined in the paper"""

@@ -73,7 +73,6 @@ except ImportError:
     load_dataset = None
 
 from client import ChainOfThoughtReader
-from generate_server import GenerateServer
 from server import SkillAggregationServer
 from server_text import TextBasedSkillAggregationServer
 
@@ -122,9 +121,9 @@ class MathDomainPipeline:
         output_dir: str = "math_output",
         use_gemini: bool = False,
         gemini_api_key: Optional[str] = None,
-        mode: str = "normal",
-        iterative: bool = False,
+        mode: str = "text",
         num_iterations: int = 3,
+        iterative: bool = True,  # Always iterative mode
     ):
         self.model_name = model_name
         self.device = device
@@ -132,7 +131,7 @@ class MathDomainPipeline:
         self.use_gemini = use_gemini
         self.gemini_api_key = gemini_api_key
         self.mode = mode  # "normal" uses server.py, "text" uses server_text.py
-        self.iterative = iterative
+        self.iterative = True  # Always True
         self.num_iterations = num_iterations
 
         os.makedirs(output_dir, exist_ok=True)
@@ -140,7 +139,7 @@ class MathDomainPipeline:
         self.client: Optional[ChainOfThoughtReader] = None
         self.server: Optional[SkillAggregationServer] = None
         self.server_text: Optional[TextBasedSkillAggregationServer] = None
-        self.generate_server: Optional[GenerateServer] = None
+        self.encyclopedia_loaded = False
 
     # ------------------------------------------------------------------
     # Dataset loading helpers
@@ -362,12 +361,14 @@ class MathDomainPipeline:
         worklist = problems[:max_problems] if max_problems else problems
         print(f"\nIteration {iteration}: Extracting skills for {dataset_name} ({len(worklist)} problems)...")
         
-        # If encyclopedia provided, solve first and track accuracy
+        # If encyclopedia provided, load it into client for solving
         results = []
         if encyclopedia_path and os.path.exists(encyclopedia_path):
             print(f"  Using encyclopedia from: {encyclopedia_path}")
-            self._ensure_generate_server()
-            self.generate_server.load_encyclopedia(encyclopedia_path)
+            self.client.load_encyclopedia(encyclopedia_path, mode=self.mode)
+            self.encyclopedia_loaded = True
+        else:
+            self.encyclopedia_loaded = False
 
         for idx, problem_data in enumerate(worklist, 1):
             problem_text = problem_data.get("problem") or problem_data.get("question", "")
@@ -377,12 +378,12 @@ class MathDomainPipeline:
 
             print(f"  [{idx}/{len(worklist)}] {problem_text[:80]}...")
             
-            # Solve with encyclopedia if provided
+            # Solve with encyclopedia if loaded
             predicted_answer = None
             is_correct = False
-            if encyclopedia_path and os.path.exists(encyclopedia_path):
+            if self.encyclopedia_loaded:
                 try:
-                    answer = self.generate_server.generate(problem_text, is_math=True)
+                    answer = self.client.solve_with_encyclopedia(problem_text, is_math=True)
                     answer_text = answer
                     if "## Answer:" in answer:
                         start_idx = answer.find("## Answer:") + len("## Answer:")
@@ -401,6 +402,20 @@ class MathDomainPipeline:
                 except Exception as exc:
                     print(f"    Error solving: {exc}")
             
+            # Even without encyclopedia in iteration 1, track that we attempted
+            # This ensures all iterations have unified result tracking
+            if not self.encyclopedia_loaded:
+                ground_truth = problem_data.get("answer") or problem_data.get("solution", "")
+                predicted_answer = ""  # No prediction without encyclopedia
+                is_correct = False
+                results.append({
+                    "dataset": dataset_name,
+                    "problem_id": problem_data.get("id", idx),
+                    "predicted_answer": predicted_answer,
+                    "ground_truth": ground_truth,
+                    "is_correct": is_correct,
+                })
+            
             # Extract skills
             try:
                 result = self.client.read_paper(task=problem_text, paper_content=None)
@@ -418,12 +433,14 @@ class MathDomainPipeline:
                     "problem_id": problem_data.get("id", idx),
                     "behavior_book": skill_book,
                     "iteration": iteration,
+                    "predicted_answer": predicted_answer if predicted_answer is not None else "",
+                    "ground_truth": problem_data.get("answer") or problem_data.get("solution", ""),
+                    "is_correct": is_correct,
                 }
-                if predicted_answer is not None:
-                    output_data["predicted_answer"] = predicted_answer
-                    output_data["ground_truth"] = problem_data.get("answer") or problem_data.get("solution", "")
-                    output_data["is_correct"] = is_correct
+                # Only add to results if not already added above (for iteration 1 case)
+                if predicted_answer is not None and self.encyclopedia_loaded:
                     results.append({
+                        "dataset": dataset_name,
                         "problem_id": problem_data.get("id", idx),
                         "predicted_answer": predicted_answer,
                         "ground_truth": output_data["ground_truth"],
@@ -532,84 +549,11 @@ class MathDomainPipeline:
         return encyclopedia_path
 
     # ------------------------------------------------------------------
-    # STEP 3: Solve multiple target datasets using one encyclopedia
+    # STEP 3: Solve multiple target datasets using one encyclopedia (DEPRECATED)
     # ------------------------------------------------------------------
-    def _ensure_generate_server(self):
-        if self.generate_server is None:
-            self.generate_server = GenerateServer(
-                model_name=self.model_name,
-                device=self.device,
-                use_gemini=self.use_gemini,
-                gemini_api_key=self.gemini_api_key,
-                mode=self.mode,
-            )
-
-    def solve_datasets(
-        self, dataset_names: List[str], encyclopedia_path: str, max_problems: Optional[int]
-    ) -> List[Dict]:
-        if not dataset_names:
-            return []
-        self._ensure_generate_server()
-        self.generate_server.load_encyclopedia(encyclopedia_path)
-
-        all_results = []
-        for dataset_name in dataset_names:
-            problems = self.load_math_dataset(dataset_name)
-            worklist = problems[:max_problems] if max_problems else problems
-            print(f"\nSolving {dataset_name} ({len(worklist)} problems)...")
-
-            dataset_results = []
-            for idx, problem_data in enumerate(worklist, 1):
-                problem_text = problem_data.get("problem") or problem_data.get("question", "")
-                if not problem_text:
-                    print(f"  [skip] Problem {idx} missing text")
-                    continue
-
-                print(f"  [{idx}/{len(worklist)}] {problem_text[:80]}...")
-                try:
-                    answer = self.generate_server.generate(problem_text, is_math=True)
-                    answer_text = answer
-                    if "## Answer:" in answer:
-                        start_idx = answer.find("## Answer:") + len("## Answer:")
-                        end_idx = answer.find("## End of Answer:")
-                        if end_idx == -1:
-                            end_idx = len(answer)
-                        answer_text = answer[start_idx:end_idx].strip()
-
-                    result = {
-                        "dataset": dataset_name,
-                        "problem_id": problem_data.get("id", idx),
-                        "problem": problem_text,
-                        "predicted_answer": answer_text,
-                        "full_response": answer,
-                        "ground_truth": problem_data.get("answer")
-                        or problem_data.get("solution", ""),
-                        "ground_truth_solution": problem_data.get("solution", ""),
-                    }
-                    dataset_results.append(result)
-                except Exception as exc:  # noqa: BLE001
-                    print(f"    Error solving problem {idx}: {exc}")
-                    dataset_results.append(
-                        {
-                            "dataset": dataset_name,
-                            "problem_id": problem_data.get("id", idx),
-                            "problem": problem_text,
-                            "predicted_answer": "",
-                            "error": str(exc),
-                        }
-                    )
-                time.sleep(0.5)
-
-            # Save per-dataset results under its folder
-            dataset_dir = os.path.join(self.output_dir, dataset_name)
-            os.makedirs(dataset_dir, exist_ok=True)
-            results_path = os.path.join(dataset_dir, "dataset2_results.json")
-            with open(results_path, "w", encoding="utf-8") as f:
-                json.dump(dataset_results, f, indent=2, ensure_ascii=False)
-            print(f"  Saved results to {results_path}")
-
-            all_results.extend(dataset_results)
-        return all_results
+    # NOTE: In iterative mode, solving is now integrated into _extract_skills_for_dataset
+    # Standard mode can still use this if needed, but iterative mode handles everything
+    # through the client with encyclopedia support
 
     # ------------------------------------------------------------------
     # Iterative Learning Pipeline
@@ -818,82 +762,8 @@ class MathDomainPipeline:
         
         return False
 
-    def run_pipeline(
-        self,
-        dataset1_list: Optional[List[str]],
-        aggregate_list: Optional[List[str]],
-        dataset2_list: Optional[List[str]],
-        max_dataset1: Optional[int],
-        max_dataset2: Optional[int],
-        r1: float,
-        r2: float,
-        start_from_step2: bool,
-        start_from_step3: bool,
-        encyclopedia_path: Optional[str],
-    ) -> Dict:
-        start_time = time.time()
 
-        # Resolve default paths
-        if not encyclopedia_path:
-            encyclopedia_path = os.path.join(
-                self.output_dir, "encyclopedia.json" if self.mode == "text" else "encyclopedia.txt"
-            )
 
-        # STEP 3 only
-        if start_from_step3 or (encyclopedia_path and not start_from_step2 and not dataset1_list):
-            if not dataset2_list:
-                raise ValueError("dataset2-list is required when starting from STEP 3")
-            if not os.path.exists(encyclopedia_path):
-                raise FileNotFoundError(f"Encyclopedia not found: {encyclopedia_path}")
-            results = self.solve_datasets(dataset2_list, encyclopedia_path, max_dataset2)
-        else:
-            # STEP 1
-            if start_from_step2:
-                if not aggregate_list and not dataset1_list:
-                    raise ValueError("Provide dataset names for aggregation when skipping STEP 1")
-                print("Skipping STEP 1 (reuse existing skills).")
-            else:
-                if not dataset1_list:
-                    raise ValueError("dataset1-list is required for STEP 1")
-                self.learn_skills_from_datasets(dataset1_list, max_dataset1, None, 0)
-
-            # STEP 2
-            aggregate_targets = aggregate_list or dataset1_list or []
-            encyclopedia_path = self.aggregate_skills(aggregate_targets, r1=r1, r2=r2)
-
-            # STEP 3
-            results = []
-            if dataset2_list:
-                results = self.solve_datasets(dataset2_list, encyclopedia_path, max_dataset2)
-
-        # Summaries
-        num_correct = sum(
-            1
-            for r in results
-            if r.get("predicted_answer")
-            and r.get("ground_truth")
-            and self._check_answer_match(
-                r["predicted_answer"], 
-                r["ground_truth"],
-                r.get("dataset", None)  # Pass dataset name for IMOBench detection
-            )
-        )
-        summary = {
-            "train_datasets": dataset1_list or [],
-            "aggregated": aggregate_list or dataset1_list or [],
-            "eval_datasets": dataset2_list or [],
-            "num_results": len(results),
-            "num_correct": num_correct,
-            "accuracy": num_correct / len(results) if results else 0.0,
-            "encyclopedia_path": encyclopedia_path,
-            "total_time_seconds": time.time() - start_time,
-        }
-
-        summary_path = os.path.join(self.output_dir, "summary.json")
-        with open(summary_path, "w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=2, ensure_ascii=False)
-        print(f"\nSummary saved to {summary_path}")
-        return summary
 
 
 # ----------------------------------------------------------------------
@@ -912,28 +782,20 @@ def _parse_list_arg(raw: Optional[List[str]]) -> Optional[List[str]]:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Multi-dataset math pipeline: learn → aggregate → solve"
+        description="Iterative math learning pipeline: solve (if encyclopedia available) + extract skills + aggregate → repeat"
     )
     parser.add_argument(
-        "--dataset1-list",
+        "--datasets",
         nargs="+",
         default=["aime25"],
-        help="Datasets for STEP 1 skill extraction (space- or comma-separated).",
+        help="Datasets for iterative learning (space- or comma-separated).",
     )
     parser.add_argument(
-        "--aggregate-list",
-        nargs="+",
+        "--max-problems",
+        type=int,
         default=None,
-        help="Datasets to aggregate in STEP 2 (default: dataset1-list).",
+        help="Limit problems per dataset per iteration."
     )
-    parser.add_argument(
-        "--dataset2-list",
-        nargs="+",
-        default=["math500"],
-        help="Datasets to solve in STEP 3 (space- or comma-separated).",
-    )
-    parser.add_argument("--max-dataset1", type=int, default=None, help="Limit problems per training dataset.")
-    parser.add_argument("--max-dataset2", type=int, default=None, help="Limit problems per eval dataset.")
     parser.add_argument(
         "-m",
         "--model",
@@ -945,37 +807,27 @@ def main():
     parser.add_argument("-o", "--output-dir", type=str, default="math_output", help="Root output directory.")
     parser.add_argument("--r1", type=float, default=0.95, help="r1 threshold for same skills.")
     parser.add_argument("--r2", type=float, default=0.6, help="r2 threshold for linked skills.")
-    parser.add_argument("--start-from-step2", action="store_true", help="Skip STEP 1 and reuse existing skills.")
-    parser.add_argument("--start-from-step3", action="store_true", help="Skip to STEP 3 using an existing encyclopedia.")
-    parser.add_argument("--encyclopedia", type=str, default=None, help="Path to pre-built encyclopedia.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
     parser.add_argument("--use-gemini", action="store_true", help="Use Google Gemini API.")
     parser.add_argument("--gemini-api-key", type=str, default=None, help="Gemini API key.")
     parser.add_argument(
         "--mode",
         type=str,
-        default="normal",
+        default="text",
         choices=["normal", "text"],
-        help="Aggregation/inference mode (normal=GraphRAG, text=text-based).",
-    )
-    parser.add_argument(
-        "--iterative",
-        action="store_true",
-        help="Run iterative learning pipeline (solve + extract skills + aggregate, repeat)",
+        help="Aggregation/inference mode (normal=GraphRAG, text=text-based). Default: text",
     )
     parser.add_argument(
         "--num-iterations",
         type=int,
         default=3,
-        help="Number of iterations for iterative mode (default: 3)",
+        help="Number of iterations (default: 3)",
     )
 
     args = parser.parse_args()
 
     # Normalize dataset lists
-    dataset1_list = _parse_list_arg(args.dataset1_list)
-    aggregate_list = _parse_list_arg(args.aggregate_list)
-    dataset2_list = _parse_list_arg(args.dataset2_list)
+    datasets = _parse_list_arg(args.datasets)
 
     # Seeds
     random.seed(args.seed)
@@ -995,32 +847,18 @@ def main():
         use_gemini=args.use_gemini,
         gemini_api_key=args.gemini_api_key,
         mode=args.mode,
-        iterative=args.iterative,
+        iterative=True,
         num_iterations=args.num_iterations,
     )
 
     try:
-        if args.iterative:
-            if not dataset1_list:
-                raise ValueError("--dataset1-list is required for iterative mode")
-            pipeline.run_iterative_pipeline(
-                dataset_list=dataset1_list,
-                max_problems=args.max_dataset1,
-                r1=args.r1,
-                r2=args.r2,
-            )
-        else:
-            pipeline.run_pipeline(
-            dataset1_list=dataset1_list,
-            aggregate_list=aggregate_list,
-            dataset2_list=dataset2_list,
-            max_dataset1=args.max_dataset1,
-            max_dataset2=args.max_dataset2,
+        if not datasets:
+            raise ValueError("--datasets is required")
+        pipeline.run_iterative_pipeline(
+            dataset_list=datasets,
+            max_problems=args.max_problems,
             r1=args.r1,
             r2=args.r2,
-            start_from_step2=args.start_from_step2,
-            start_from_step3=args.start_from_step3,
-            encyclopedia_path=args.encyclopedia,
         )
     except Exception as exc:  # noqa: BLE001
         print(f"Error: {exc}")
@@ -1028,14 +866,9 @@ def main():
 
         traceback.print_exc()
         print("\nExamples:")
-        print("  python math_domain.py --dataset1-list aime24 aime25 math500 --dataset2-list math500")
-        print("  python math_domain.py --aggregate-list math500 aime25 --dataset2-list aime24 math500")
-        print(
-            "  python math_domain.py --start-from-step2 --aggregate-list math500 aime25 --dataset2-list math500"
-        )
-        print(
-            "  python math_domain.py --start-from-step3 --encyclopedia math_output/encyclopedia.json --dataset2-list math500"
-        )
+        print("  python math_domain.py --datasets aime25 --max-problems 10 --num-iterations 3")
+        print("  python math_domain.py --datasets gsm8k math500 --max-problems 20 --mode text")
+        print("  python math_domain.py --datasets imo_answerbench --max-problems 30 --num-iterations 5")
 
 
 if __name__ == "__main__":
