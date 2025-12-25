@@ -123,6 +123,8 @@ class MathDomainPipeline:
         use_gemini: bool = False,
         gemini_api_key: Optional[str] = None,
         mode: str = "normal",
+        iterative: bool = False,
+        num_iterations: int = 3,
     ):
         self.model_name = model_name
         self.device = device
@@ -130,6 +132,8 @@ class MathDomainPipeline:
         self.use_gemini = use_gemini
         self.gemini_api_key = gemini_api_key
         self.mode = mode  # "normal" uses server.py, "text" uses server_text.py
+        self.iterative = iterative
+        self.num_iterations = num_iterations
 
         os.makedirs(output_dir, exist_ok=True)
 
@@ -336,14 +340,34 @@ class MathDomainPipeline:
             )
 
     def _extract_skills_for_dataset(
-        self, dataset_name: str, problems: List[Dict], max_problems: Optional[int]
-    ) -> str:
+        self, dataset_name: str, problems: List[Dict], max_problems: Optional[int],
+        encyclopedia_path: Optional[str] = None, iteration: int = 0
+    ) -> Tuple[str, List[Dict]]:
+        """Extract skills from dataset, optionally solving with encyclopedia first.
+        
+        Args:
+            dataset_name: Name of dataset
+            problems: List of problems
+            max_problems: Max problems to process
+            encyclopedia_path: If provided, solve with encyclopedia before extracting skills
+            iteration: Current iteration number (for logging)
+            
+        Returns:
+            Tuple of (skills_dir, results_list)
+        """
         self._ensure_client()
         skills_dir = os.path.join(self.output_dir, dataset_name)
         os.makedirs(skills_dir, exist_ok=True)
 
         worklist = problems[:max_problems] if max_problems else problems
-        print(f"\nExtracting skills for {dataset_name} ({len(worklist)} problems)...")
+        print(f"\nIteration {iteration}: Extracting skills for {dataset_name} ({len(worklist)} problems)...")
+        
+        # If encyclopedia provided, solve first and track accuracy
+        results = []
+        if encyclopedia_path and os.path.exists(encyclopedia_path):
+            print(f"  Using encyclopedia from: {encyclopedia_path}")
+            self._ensure_generate_server()
+            self.generate_server.load_encyclopedia(encyclopedia_path)
 
         for idx, problem_data in enumerate(worklist, 1):
             problem_text = problem_data.get("problem") or problem_data.get("question", "")
@@ -352,6 +376,32 @@ class MathDomainPipeline:
                 continue
 
             print(f"  [{idx}/{len(worklist)}] {problem_text[:80]}...")
+            
+            # Solve with encyclopedia if provided
+            predicted_answer = None
+            is_correct = False
+            if encyclopedia_path and os.path.exists(encyclopedia_path):
+                try:
+                    answer = self.generate_server.generate(problem_text, is_math=True)
+                    answer_text = answer
+                    if "## Answer:" in answer:
+                        start_idx = answer.find("## Answer:") + len("## Answer:")
+                        end_idx = answer.find("## End of Answer:")
+                        if end_idx == -1:
+                            end_idx = len(answer)
+                        answer_text = answer[start_idx:end_idx].strip()
+                    predicted_answer = answer_text
+                    
+                    ground_truth = problem_data.get("answer") or problem_data.get("solution", "")
+                    is_correct = self._check_answer_match(
+                        predicted_answer, ground_truth, dataset_name
+                    )
+                    status = "✓" if is_correct else "✗"
+                    print(f"    {status} Predicted: {predicted_answer[:50]}... | GT: {ground_truth[:50]}...")
+                except Exception as exc:
+                    print(f"    Error solving: {exc}")
+            
+            # Extract skills
             try:
                 result = self.client.read_paper(task=problem_text, paper_content=None)
                 skill_book = result.get("behavior_book", {})
@@ -367,7 +417,19 @@ class MathDomainPipeline:
                     "problem": problem_text,
                     "problem_id": problem_data.get("id", idx),
                     "behavior_book": skill_book,
+                    "iteration": iteration,
                 }
+                if predicted_answer is not None:
+                    output_data["predicted_answer"] = predicted_answer
+                    output_data["ground_truth"] = problem_data.get("answer") or problem_data.get("solution", "")
+                    output_data["is_correct"] = is_correct
+                    results.append({
+                        "problem_id": problem_data.get("id", idx),
+                        "predicted_answer": predicted_answer,
+                        "ground_truth": output_data["ground_truth"],
+                        "is_correct": is_correct,
+                    })
+                
                 output_path = os.path.join(skills_dir, f"problem_{idx:04d}.json")
                 with open(output_path, "w", encoding="utf-8") as f:
                     json.dump(output_data, f, indent=2, ensure_ascii=False)
@@ -375,23 +437,41 @@ class MathDomainPipeline:
                 time.sleep(0.5)
             except Exception as exc:  # noqa: BLE001
                 print(f"    Error processing problem {idx}: {exc}")
-        return skills_dir
+        
+        return skills_dir, results
 
     def learn_skills_from_datasets(
-        self, dataset_names: List[str], max_problems: Optional[int]
-    ) -> Dict[str, str]:
+        self, dataset_names: List[str], max_problems: Optional[int],
+        encyclopedia_path: Optional[str] = None, iteration: int = 0
+    ) -> Tuple[Dict[str, str], List[Dict]]:
+        """Learn skills from datasets, optionally solving with encyclopedia first.
+        
+        Returns:
+            Tuple of (skills_map, all_results)
+        """
         if not dataset_names:
             raise ValueError("Provide at least one dataset for STEP 1.")
 
         skills_map: Dict[str, str] = {}
+        all_results = []
         for name in dataset_names:
             problems = self.load_math_dataset(name)
-            skills_dir = self._extract_skills_for_dataset(name, problems, max_problems)
+            skills_dir, results = self._extract_skills_for_dataset(
+                name, problems, max_problems, encyclopedia_path, iteration
+            )
             skills_map[name] = skills_dir
+            all_results.extend(results)
+        
         print("\nFinished STEP 1 across datasets:")
         for name, path in skills_map.items():
             print(f"  - {name}: {path}")
-        return skills_map
+        
+        if all_results:
+            num_correct = sum(1 for r in all_results if r["is_correct"])
+            accuracy = num_correct / len(all_results) if all_results else 0.0
+            print(f"\nIteration {iteration} Accuracy: {num_correct}/{len(all_results)} = {accuracy:.2%}")
+        
+        return skills_map, all_results
 
     # ------------------------------------------------------------------
     # STEP 2: Aggregate chosen skills into one encyclopedia
@@ -532,6 +612,117 @@ class MathDomainPipeline:
         return all_results
 
     # ------------------------------------------------------------------
+    # Iterative Learning Pipeline
+    # ------------------------------------------------------------------
+    def run_iterative_pipeline(
+        self,
+        dataset_list: List[str],
+        max_problems: Optional[int],
+        r1: float = 0.95,
+        r2: float = 0.4,
+    ) -> Dict:
+        """Run iterative learning pipeline.
+        
+        Each iteration:
+        1. Use encyclopedia (from previous iteration) to solve problems and log accuracy
+        2. Extract skills from the same problems
+        3. Aggregate skills into new encyclopedia
+        4. Repeat
+        
+        Args:
+            dataset_list: List of datasets to train on
+            max_problems: Max problems per dataset
+            r1: Similarity threshold for aggregation
+            r2: Similarity threshold for aggregation
+            
+        Returns:
+            Summary dict with iteration history
+        """
+        if not dataset_list:
+            raise ValueError("Provide at least one dataset for iterative learning")
+        
+        start_time = time.time()
+        iteration_history = []
+        encyclopedia_path = None
+        
+        print(f"\n{'='*80}")
+        print(f"Starting Iterative Learning Pipeline: {self.num_iterations} iterations")
+        print(f"Datasets: {', '.join(dataset_list)}")
+        print(f"Max problems per dataset: {max_problems or 'all'}")
+        print(f"{'='*80}\n")
+        
+        for iteration in range(1, self.num_iterations + 1):
+            print(f"\n{'='*80}")
+            print(f"ITERATION {iteration}/{self.num_iterations}")
+            print(f"{'='*80}")
+            
+            # STEP 1: Extract skills (and solve if encyclopedia exists)
+            skills_map, results = self.learn_skills_from_datasets(
+                dataset_list, max_problems, encyclopedia_path, iteration
+            )
+            
+            # Calculate accuracy for this iteration
+            accuracy = 0.0
+            num_correct = 0
+            if results:
+                num_correct = sum(1 for r in results if r["is_correct"])
+                accuracy = num_correct / len(results)
+            
+            # STEP 2: Aggregate skills into encyclopedia
+            print(f"\nIteration {iteration}: Aggregating skills...")
+            encyclopedia_path = self.aggregate_skills(dataset_list, r1=r1, r2=r2)
+            
+            # Save iteration results
+            iteration_dir = os.path.join(self.output_dir, f"iteration_{iteration}")
+            os.makedirs(iteration_dir, exist_ok=True)
+            
+            iteration_summary = {
+                "iteration": iteration,
+                "datasets": dataset_list,
+                "num_problems": len(results),
+                "num_correct": num_correct,
+                "accuracy": accuracy,
+                "encyclopedia_path": encyclopedia_path,
+            }
+            iteration_history.append(iteration_summary)
+            
+            # Save iteration results
+            iteration_results_path = os.path.join(iteration_dir, "results.json")
+            with open(iteration_results_path, "w", encoding="utf-8") as f:
+                json.dump({
+                    "summary": iteration_summary,
+                    "results": results,
+                }, f, indent=2, ensure_ascii=False)
+            
+            print(f"\nIteration {iteration} Summary:")
+            print(f"  Accuracy: {num_correct}/{len(results)} = {accuracy:.2%}")
+            print(f"  Encyclopedia: {encyclopedia_path}")
+            print(f"  Results saved: {iteration_results_path}")
+        
+        # Final summary
+        final_summary = {
+            "mode": "iterative",
+            "num_iterations": self.num_iterations,
+            "datasets": dataset_list,
+            "iteration_history": iteration_history,
+            "total_time_seconds": time.time() - start_time,
+        }
+        
+        summary_path = os.path.join(self.output_dir, "iterative_summary.json")
+        with open(summary_path, "w", encoding="utf-8") as f:
+            json.dump(final_summary, f, indent=2, ensure_ascii=False)
+        
+        print(f"\n{'='*80}")
+        print("ITERATIVE LEARNING COMPLETE")
+        print(f"{'='*80}")
+        print(f"\nAccuracy progression:")
+        for iter_sum in iteration_history:
+            print(f"  Iteration {iter_sum['iteration']}: {iter_sum['accuracy']:.2%}")
+        print(f"\nFinal summary saved: {summary_path}")
+        
+        return final_summary
+
+    # ------------------------------------------------------------------
     # Orchestration
     # ------------------------------------------------------------------
     def _check_answer_match(self, predicted: str, ground_truth: str, dataset_name: Optional[str] = None) -> bool:
@@ -664,7 +855,7 @@ class MathDomainPipeline:
             else:
                 if not dataset1_list:
                     raise ValueError("dataset1-list is required for STEP 1")
-                self.learn_skills_from_datasets(dataset1_list, max_dataset1)
+                self.learn_skills_from_datasets(dataset1_list, max_dataset1, None, 0)
 
             # STEP 2
             aggregate_targets = aggregate_list or dataset1_list or []
@@ -767,6 +958,17 @@ def main():
         choices=["normal", "text"],
         help="Aggregation/inference mode (normal=GraphRAG, text=text-based).",
     )
+    parser.add_argument(
+        "--iterative",
+        action="store_true",
+        help="Run iterative learning pipeline (solve + extract skills + aggregate, repeat)",
+    )
+    parser.add_argument(
+        "--num-iterations",
+        type=int,
+        default=3,
+        help="Number of iterations for iterative mode (default: 3)",
+    )
 
     args = parser.parse_args()
 
@@ -793,10 +995,22 @@ def main():
         use_gemini=args.use_gemini,
         gemini_api_key=args.gemini_api_key,
         mode=args.mode,
+        iterative=args.iterative,
+        num_iterations=args.num_iterations,
     )
 
     try:
-        pipeline.run_pipeline(
+        if args.iterative:
+            if not dataset1_list:
+                raise ValueError("--dataset1-list is required for iterative mode")
+            pipeline.run_iterative_pipeline(
+                dataset_list=dataset1_list,
+                max_problems=args.max_dataset1,
+                r1=args.r1,
+                r2=args.r2,
+            )
+        else:
+            pipeline.run_pipeline(
             dataset1_list=dataset1_list,
             aggregate_list=aggregate_list,
             dataset2_list=dataset2_list,
