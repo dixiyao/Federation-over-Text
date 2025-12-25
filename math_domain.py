@@ -924,7 +924,6 @@ def main():
         use_gemini=args.use_gemini,
         gemini_api_key=args.gemini_api_key,
         mode=args.mode,
-        iterative=True,
         num_iterations=args.num_iterations,
     )
 
