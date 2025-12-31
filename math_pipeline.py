@@ -1,6 +1,6 @@
 """
 Math Problem Solving Pipeline
-Uses client.py to learn skills from dataset1, aggregates with server.py,
+Uses client.py to learn insights from dataset1, aggregates with server.py,
 and uses client.py to solve problems in dataset2 with the encyclopedia.
 """
 
@@ -21,8 +21,8 @@ except ImportError:
 
 from client import ChainOfThoughtReader
 from math_datasets.utils import extract_numbers
-from server import SkillAggregationServer
-from server_text import TextBasedSkillAggregationServer
+from server import InsightAggregationServer
+from server_text import TextBasedInsightAggregationServer
 
 DATASET_DICT = {
     "gsm8k": ("openai/gsm8k", "main", "test"),
@@ -37,7 +37,7 @@ DATASET_DICT = {
 
 class MathPipeline:
     """
-    Pipeline for learning skills from math problems and applying them to new problems.
+    Pipeline for learning insights from math problems and applying them to new problems.
     """
 
     def __init__(
@@ -161,19 +161,19 @@ class MathPipeline:
 
         return normalized
 
-    def learn_skills_from_dataset1(
+    def learn_insights_from_dataset1(
         self, dataset1_name: str, max_problems: Optional[int] = None
     ) -> str:
         """
-        Step 1: Use client.py to learn skills from dataset1 (e.g., aime25).
-        Each question uses a client to extract skills.
-        Skills are saved directly to output_dir as problem_*.json files.
+        Step 1: Use client.py to learn insights from dataset1 (e.g., aime25).
+        Each question uses a client to extract insights.
+        Insights are saved directly to output_dir as problem_*.json files.
 
         Returns:
-            Path to output directory containing skill JSON files
+            Path to output directory containing insight JSON files
         """
         print("\n" + "=" * 80)
-        print("STEP 1: Learning Skills from Dataset1")
+        print("STEP 1: Learning Insights from Dataset1")
         print("=" * 80)
 
         problems = self.load_math_dataset(dataset1_name)
@@ -190,11 +190,11 @@ class MathPipeline:
             gemini_api_key=self.gemini_api_key,
         )
 
-        # Ensure output directory exists (skills will be saved directly here)
+        # Ensure output directory exists (insights will be saved directly here)
         os.makedirs(self.output_dir, exist_ok=True)
 
-        # Process each problem to extract skills
-        print(f"\nProcessing {len(problems)} problems to extract skills...")
+        # Process each problem to extract insights
+        print(f"\nProcessing {len(problems)} problems to extract insights...")
         for idx, problem_data in enumerate(problems, 1):
             # Try both 'problem' and 'question' fields (normalized in load_math_dataset)
             problem_text = problem_data.get("problem") or problem_data.get(
@@ -210,28 +210,28 @@ class MathPipeline:
             print(f"Problem: {problem_text}")
 
             try:
-                # Use client to extract skills from this problem
+                # Use client to extract insights from this problem
                 # The task/question is the problem itself
                 result = self.client.read_paper(task=problem_text, paper_content=None)
 
-                # Save skill book for this problem
-                skill_book = result.get("behavior_book", {})
-                if skill_book:
-                    # Filter out any fallback skills that might have been added
-                    skill_book = {
+                # Save insight book for this problem
+                insight_book = result.get("insight_book", {})
+                if insight_book:
+                    # Filter out any fallback insights that might have been added
+                    insight_book = {
                         k: v
-                        for k, v in skill_book.items()
-                        if not k.startswith("skill_fallback")
+                        for k, v in insight_book.items()
+                        if not k.startswith("insight_fallback")
                     }
 
-                    if skill_book:  # Only save if there are valid skills
+                    if insight_book:  # Only save if there are valid insights
                         output_data = {
                             "problem": problem_text,
                             "problem_id": problem_data.get("id", idx),
-                            "behavior_book": skill_book,
+                            "behavior_book": insight_book,
                         }
                     else:
-                        print("  No valid skills extracted (only fallback found)")
+                        print("  No valid insights extracted (only fallback found)")
                         continue
 
                     # Save directly to output_dir (not in a subdirectory)
@@ -241,9 +241,9 @@ class MathPipeline:
                     with open(output_path, "w", encoding="utf-8") as f:
                         json.dump(output_data, f, indent=2, ensure_ascii=False)
 
-                    print(f"  Extracted {len(skill_book)} skills -> {output_path}")
+                    print(f"  Extracted {len(insight_book)} insights -> {output_path}")
                 else:
-                    print("  No skills extracted from this problem")
+                    print("  No insights extracted from this problem")
 
                 time.sleep(0.5)  # Rate limiting
 
@@ -254,38 +254,38 @@ class MathPipeline:
                 traceback.print_exc()
                 continue
 
-        print(f"\nCompleted skill extraction. Skills saved to: {self.output_dir}")
+        print(f"\nCompleted insight extraction. Insights saved to: {self.output_dir}")
         return self.output_dir
 
-    def aggregate_skills(
-        self, skills_dir: str, r1: float = 0.9, r2: float = 0.4
+    def aggregate_insights(
+        self, insights_dir: str, r1: float = 0.9, r2: float = 0.4
     ) -> str:
         """
-        Step 2: Aggregate skills from all problems.
-        - Normal mode: Use server.py to aggregate skills
-        - Text mode: Use server_text.py to aggregate skills using text-based prompts
+        Step 2: Aggregate insights from all problems.
+        - Normal mode: Use server.py to aggregate insights
+        - Text mode: Use server_text.py to aggregate insights using text-based prompts
 
         Returns:
             Path to encyclopedia file
         """
         print("\n" + "=" * 80)
-        print("STEP 2: Aggregating Skills")
+        print("STEP 2: Aggregating Insights")
         print("=" * 80)
 
         if self.mode == "text":
             # Text mode: Use server_text.py
-            print("Using text-based skill aggregation (server_text.py)...")
-            self.server_text = TextBasedSkillAggregationServer(
+            print("Using text-based insight aggregation (server_text.py)...")
+            self.server_text = TextBasedInsightAggregationServer(
                 model_name=self.model_name,
                 device=self.device,
-                input_dir=skills_dir,
+                input_dir=insights_dir,
                 use_gemini=self.use_gemini,
                 gemini_api_key=self.gemini_api_key,
             )
 
-            # Aggregate skills using text-based approach
+            # Aggregate insights using text-based approach
             result = self.server_text.aggregate_and_build_encyclopedia(
-                json_files=None,  # Use all JSON files in skills_dir
+                json_files=None,  # Use all JSON files in insights_dir
                 output_dir=self.output_dir,
             )
 
@@ -296,18 +296,18 @@ class MathPipeline:
             encyclopedia_path = os.path.join(self.output_dir, "encyclopedia.json")
         else:
             # Normal mode: Use server.py
-            print("Using GraphRAG-based skill aggregation (server.py)...")
-            self.server = SkillAggregationServer(
+            print("Using GraphRAG-based insight aggregation (server.py)...")
+            self.server = InsightAggregationServer(
                 model_name=self.model_name,
                 device=self.device,
-                input_dir=skills_dir,
+                input_dir=insights_dir,
                 use_gemini=self.use_gemini,
                 gemini_api_key=self.gemini_api_key,
             )
 
-            # Aggregate skills
+            # Aggregate insights
             result = self.server.aggregate_and_build_encyclopedia(
-                json_files=None,  # Use all JSON files in skills_dir
+                json_files=None,  # Use all JSON files in insights_dir
                 r1=r1,
                 r2=r2,
                 output_dir=self.output_dir,
@@ -319,7 +319,7 @@ class MathPipeline:
             # Encyclopedia path for normal mode
             encyclopedia_path = os.path.join(self.output_dir, "encyclopedia.txt")
 
-        print(f"\nSkills aggregated. Encyclopedia saved to: {encyclopedia_path}")
+        print(f"\nInsights aggregated. Encyclopedia saved to: {encyclopedia_path}")
         return encyclopedia_path
 
     def solve_dataset2(
@@ -329,14 +329,14 @@ class MathPipeline:
         max_problems: Optional[int] = None,
     ) -> List[Dict]:
         """
-        Step 3: Solve problems in dataset2 using learned skills.
+        Step 3: Solve problems in dataset2 using learned insights.
         Uses client.py with encyclopedia loaded.
 
         Returns:
             List of results with predictions
         """
         print("\n" + "=" * 80)
-        print("STEP 3: Solving Dataset2 with Learned Skills")
+        print("STEP 3: Solving Dataset2 with Learned Insights")
         print("=" * 80)
 
         problems = self.load_math_dataset(dataset2_name)
@@ -442,18 +442,18 @@ class MathPipeline:
     ) -> Dict:
         """
         Run the complete pipeline:
-        1. Learn skills from dataset1 (skipped if skills_dir is provided or start_from_step2 is True)
-        2. Aggregate skills
-        3. Solve dataset2 using learned skills (skipped if dataset2_name is None)
+        1. Learn insights from dataset1 (skipped if insights_dir is provided or start_from_step2 is True)
+        2. Aggregate insights
+        3. Solve dataset2 using learned insights (skipped if dataset2_name is None)
 
         Args:
-            dataset1_name: Dataset name for learning skills (required if skills_dir not provided)
+            dataset1_name: Dataset name for learning insights (required if insights_dir not provided)
             dataset2_name: Dataset name for testing (optional, if None, skip step 3)
             max_dataset1: Maximum number of problems from dataset1
             max_dataset2: Maximum number of problems from dataset2
-            r1: Threshold for same skills
-            r2: Threshold for linked skills
-            skills_dir: Existing skills directory (if provided, skip step 1)
+            r1: Threshold for same insights
+            r2: Threshold for linked insights
+            skills_dir: Existing insights directory (if provided, skip step 1)
             start_from_step2: If True, use default output_dir (math_output) and skip step 1
 
         Returns:
@@ -481,44 +481,45 @@ class MathPipeline:
                 dataset2_name, encyclopedia_path, max_problems=max_dataset2
             )
         else:
-            # Step 1: Learn skills from dataset1 (or use existing)
+            # Step 1: Learn insights from dataset1 (or use existing)
             if start_from_step2:
-                # Use default output directory (skills are saved directly here)
-                skills_dir = self.output_dir
-                if not os.path.exists(skills_dir):
+                # Use default output directory (insights are saved directly here)
+                insights_dir = self.output_dir
+                if not os.path.exists(insights_dir):
                     raise FileNotFoundError(
-                        f"Output directory not found: {skills_dir}\n"
-                        "Please run STEP 1 first or provide a valid --skills-dir"
+                        f"Output directory not found: {insights_dir}\n"
+                        "Please run STEP 1 first or provide a valid --insights-dir"
                     )
-                # Check if there are any skill JSON files
+                # Check if there are any insight JSON files
                 json_files = [
                     f
-                    for f in os.listdir(skills_dir)
+                    for f in os.listdir(insights_dir)
                     if f.endswith(".json") and f.startswith("problem_")
                 ]
                 if not json_files:
                     raise FileNotFoundError(
-                        f"No skill files found in: {skills_dir}\n"
-                        "Please run STEP 1 first to generate skill files"
+                        f"No insight files found in: {insights_dir}\n"
+                        "Please run STEP 1 first to generate insight files"
                     )
-                print(f"\nSkipping STEP 1. Using existing skills from: {skills_dir}")
+                print(f"\nSkipping STEP 1. Using existing insights from: {insights_dir}")
             elif skills_dir:
-                # Use provided skills directory
+                # Use provided insights directory
                 if not os.path.exists(skills_dir):
-                    raise FileNotFoundError(f"Skills directory not found: {skills_dir}")
-                print(f"\nSkipping STEP 1. Using existing skills from: {skills_dir}")
+                    raise FileNotFoundError(f"Insights directory not found: {skills_dir}")
+                insights_dir = skills_dir
+                print(f"\nSkipping STEP 1. Using existing insights from: {insights_dir}")
             else:
-                # Run STEP 1: Learn skills from dataset1
+                # Run STEP 1: Learn insights from dataset1
                 if not dataset1_name:
                     raise ValueError(
-                        "dataset1_name is required if skills_dir is not provided"
+                        "dataset1_name is required if insights_dir is not provided"
                     )
-                skills_dir = self.learn_skills_from_dataset1(
+                insights_dir = self.learn_insights_from_dataset1(
                     dataset1_name, max_problems=max_dataset1
                 )
 
-            # Step 2: Aggregate skills
-            encyclopedia_path = self.aggregate_skills(skills_dir, r1=r1, r2=r2)
+            # Step 2: Aggregate insights
+            encyclopedia_path = self.aggregate_insights(insights_dir, r1=r1, r2=r2)
 
             # Step 3: Solve dataset2 (optional)
             results = []

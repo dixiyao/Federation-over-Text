@@ -1,12 +1,12 @@
 """
-Text-Based Skill Aggregation Server
-Implements a purely text-based approach for building an Encyclopedia from multiple skill books.
-Uses LLM prompts to analyze relationships, merge skills, and extract general knowledge.
+Text-Based Insight Aggregation Server
+Implements a purely text-based approach for building an Encyclopedia from multiple insight books.
+Uses LLM prompts to analyze relationships, merge insights, and extract general knowledge.
 
 Pipeline:
-1. Collect Skill Books → Aggregate Skill Store
-2. Text-Based Profiling → Analyze relationships, merge same skills, cluster related skills
-3. Knowledge Extraction → Extract general, fundamental knowledge that can derive collected skills
+1. Collect Insight Books → Aggregate Insight Store
+2. Text-Based Profiling → Analyze relationships, merge same insights, cluster related insights
+3. Knowledge Extraction → Extract general, fundamental knowledge that can derive collected insights
 """
 
 import argparse
@@ -29,9 +29,9 @@ except ImportError:
     HAS_GEMINI = False
 
 
-class TextBasedSkillAggregationServer:
+class TextBasedInsightAggregationServer:
     """
-    Text-based server that aggregates skill books using LLM prompts
+    Text-based server that aggregates insight books using LLM prompts
     to analyze relationships and extract general knowledge.
     """
 
@@ -45,10 +45,10 @@ class TextBasedSkillAggregationServer:
     ):
         self.model_name = model_name
         self.input_dir = input_dir
-        self.skill_store = {}  # Aggregated skill store
+        self.insight_store = {}  # Aggregated insight store
         self.encyclopedia = ""  # Final encyclopedia
         self.aggregation_steps = []
-        self.skill_relationships = {}  # Text-based profiling of relationships
+        self.insight_relationships = {}  # Text-based profiling of relationships
 
         # Gemini API support
         self.use_gemini = use_gemini
@@ -259,7 +259,7 @@ class TextBasedSkillAggregationServer:
         except Exception as e:
             raise RuntimeError(f"Error calling Gemini API: {e}")
 
-    def collect_skill_books(self, json_files: Optional[List[str]] = None) -> Dict:
+    def collect_insight_books(self, json_files: Optional[List[str]] = None) -> Dict:
         """
         Step 1: Collect skill books from multiple client result JSON files sequentially.
 
@@ -287,8 +287,8 @@ class TextBasedSkillAggregationServer:
         print(f"Collecting skill books from {len(json_files)} files...")
 
         collected_books = {}
-        all_skills = {}
-        skill_counts = {}  # Track how many times each skill appears
+        all_insights = {}
+        insight_counts = {}  # Track how many times each skill appears
         total_skills_count = 0  # Total count including duplicates
         problems = []
 
@@ -300,102 +300,102 @@ class TextBasedSkillAggregationServer:
 
                 # Extract skill book (client.py uses "behavior_book" key but contains skills)
                 # Handle both dict and list formats
-                skill_book_raw = (
+                insight_book_raw = (
                     data.get("behavior_book")
                     or data.get("behaviors")
                     or data.get("skills")
                 )
 
                 # Convert list format to dict if needed
-                skill_book = {}
-                if isinstance(skill_book_raw, dict):
-                    skill_book = skill_book_raw
-                elif isinstance(skill_book_raw, list):
+                insight_book = {}
+                if isinstance(insight_book_raw, dict):
+                    insight_book = insight_book_raw
+                elif isinstance(insight_book_raw, list):
                     # Convert list of dicts to dict format
                     # Expected format: [{"behavior": "name", "description": "desc"}, ...]
-                    for item in skill_book_raw:
+                    for item in insight_book_raw:
                         if isinstance(item, dict):
                             # Try different key names
-                            skill_name = (
+                            insight_name = (
                                 item.get("behavior")
                                 or item.get("skill")
                                 or item.get("name")
                             )
-                            skill_desc = item.get("description") or item.get("desc")
-                            if skill_name and skill_desc:
+                            insight_desc = item.get("description") or item.get("desc")
+                            if insight_name and insight_desc:
                                 # Ensure skill name starts with "skill_" prefix
-                                if not skill_name.startswith("skill_"):
-                                    skill_name = f"skill_{skill_name}"
-                                skill_book[skill_name] = skill_desc
-                elif isinstance(data, dict) and not skill_book_raw:
+                                if not insight_name.startswith("skill_"):
+                                    insight_name = f"skill_{insight_name}"
+                                insight_book[insight_name] = insight_desc
+                elif isinstance(data, dict) and not insight_book_raw:
                     # Check if data itself is a skill book (direct format from client.py)
                     # If all keys start with "skill_" or most keys are strings with descriptions
-                    skill_keys = [
+                    insight_keys = [
                         k
                         for k in data.keys()
                         if isinstance(k, str) and k.startswith("skill_")
                     ]
-                    if len(skill_keys) > 0 and len(skill_keys) >= len(data) * 0.8:
+                    if len(insight_keys) > 0 and len(insight_keys) >= len(data) * 0.8:
                         # This is likely a direct skill book dictionary
-                        skill_book = data
+                        insight_book = data
                     elif all(
                         isinstance(v, str) and len(v) > 20
                         for v in data.values()
                         if isinstance(v, str)
                     ):
                         # All values are strings (likely descriptions), treat as skill book
-                        skill_book = data
+                        insight_book = data
 
-                if skill_book:
+                if insight_book:
                     filename = Path(json_file).stem
                     collected_books[filename] = {
                         "problem": data.get("problem", "Unknown"),
-                        "skill_book": skill_book,
-                        "behavior_book": skill_book,  # Keep for compatibility
+                        "insight_book": insight_book,
+                        "behavior_book": insight_book,  # Keep for compatibility
                         "solution": data.get("solution", ""),
                         "reflection": data.get("reflection", ""),
                     }
 
                     # Count and aggregate all skills
-                    total_skills_count += len(skill_book)
-                    for skill_name, skill_desc in skill_book.items():
+                    total_skills_count += len(insight_book)
+                    for insight_name, insight_desc in insight_book.items():
                         # Update skill store (keep latest description if duplicate)
-                        all_skills[skill_name] = skill_desc
+                        all_insights[insight_name] = insight_desc
                         # Count occurrences
-                        skill_counts[skill_name] = skill_counts.get(skill_name, 0) + 1
+                        insight_counts[insight_name] = insight_counts.get(insight_name, 0) + 1
 
                     problems.append(data.get("problem", "Unknown"))
 
-                    print(f"  Collected {len(skill_book)} skills from {filename}")
+                    print(f"  Collected {len(insight_book)} skills from {filename}")
             except Exception as e:
                 print(f"  Warning: Failed to read {json_file}: {e}")
                 continue
 
         # Create aggregated skill store
-        self.skill_store = all_skills
+        self.insight_store = all_insights
 
         step_result = {
             "step": 1,
             "name": "Collect Skill Books",
             "files_processed": len(collected_books),
             "total_skills_collected": total_skills_count,  # Total including duplicates
-            "unique_skills": len(all_skills),  # Unique skill count
-            "skill_counts": skill_counts,  # Count of each skill
+            "unique_skills": len(all_insights),  # Unique skill count
+            "insight_counts": insight_counts,  # Count of each skill
             "collected_books": collected_books,
-            "skill_store": self.skill_store,
-            "behavior_bookstore": self.skill_store,  # Keep for compatibility
+            "insight_store": self.insight_store,
+            "behavior_bookstore": self.insight_store,  # Keep for compatibility
             "problems": problems,
             "timestamp": time.time(),
         }
 
         self.aggregation_steps.append(step_result)
         print(
-            f"\nCollected {total_skills_count} total skills ({len(all_skills)} unique) from {len(collected_books)} files"
+            f"\nCollected {total_skills_count} total skills ({len(all_insights)} unique) from {len(collected_books)} files"
         )
 
         return step_result
 
-    def _get_text_profiling_prompt(self, skill_store: Dict) -> str:
+    def _get_text_profiling_prompt(self, insight_store: Dict) -> str:
         """Step 2: Prompt for text-based profiling of skill relationships
 
         Based on research in hierarchical skill learning, skill composition, and knowledge graphs.
@@ -405,13 +405,13 @@ class TextBasedSkillAggregationServer:
         - Knowledge Graph approaches: Relationship mapping and ontology construction
         """
         skills_text = "\n".join(
-            [f"- {name}: {desc}" for name, desc in skill_store.items()]
+            [f"- {name}: {desc}" for name, desc in insight_store.items()]
         )
 
         prompt = f"""
 You are analyzing a collection of problem-solving skills to understand their relationships and structure, following principles from hierarchical skill learning and knowledge graph construction.
 
-**Collected Skills ({len(skill_store)} total):**
+**Collected Skills ({len(insight_store)} total):**
 {skills_text}
 
 **Your Task:**
@@ -445,15 +445,15 @@ Analyze these skills and build a profiling of their relationships:
     {{
       "cluster_id": 0,
       "cluster_name": "Domain/Theme Name",
-      "skills": ["skill_name1", "skill_name2", "skill_name3"],
+      "skills": ["insight_name1", "insight_name2", "insight_name3"],
       "common_theme": "What these skills share in common",
       "domain": "mathematics/algebra/geometry/etc"
     }}
   ],
   "relationships": [
     {{
-      "skill_a": "skill_name1",
-      "skill_b": "skill_name2",
+      "skill_a": "insight_name1",
+      "skill_b": "insight_name2",
       "relationship_type": "prerequisite/complementary/alternative/similar/derived_from/composes_with",
       "description": "How these skills relate to each other"
     }}
@@ -465,12 +465,12 @@ Analyze these skills and build a profiling of their relationships:
 """
         return prompt
 
-    def _step_text_profiling(self, skill_store: Dict) -> Dict:
+    def _step_text_profiling(self, insight_store: Dict) -> Dict:
         """Step 2: Text-based profiling of skill relationships"""
         print("Building text-based profiling of skill relationships...")
-        print(f"Analyzing {len(skill_store)} skills...")
+        print(f"Analyzing {len(insight_store)} skills...")
 
-        prompt = self._get_text_profiling_prompt(skill_store)
+        prompt = self._get_text_profiling_prompt(insight_store)
         system_prompt = None
 
         response = self._call_model(prompt, system_prompt, max_new_tokens=92768)
@@ -487,18 +487,18 @@ Analyze these skills and build a profiling of their relationships:
             profiling_data = {
                 "clusters": [],
                 "relationships": [],
-                "skills": list(skill_store.keys()),
+                "skills": list(insight_store.keys()),
                 "raw_response": response,
             }
 
-        self.skill_relationships = profiling_data
+        self.insight_relationships = profiling_data
 
         step_result = {
             "step": 2,
             "name": "Text-Based Profiling",
             "prompt": prompt,
             "response": response,
-            "profiling": self.skill_relationships,
+            "profiling": self.insight_relationships,
             "timestamp": time.time(),
         }
 
@@ -506,7 +506,7 @@ Analyze these skills and build a profiling of their relationships:
         return step_result
 
     def _get_knowledge_extraction_prompt(
-        self, skill_store: Dict, profiling: Dict, existing_encyclopedia: str = ""
+        self, insight_store: Dict, profiling: Dict, existing_encyclopedia: str = ""
     ) -> str:
         """Step 3: Prompt for extracting general, fundamental knowledge
 
@@ -531,12 +531,12 @@ Analyze these skills and build a profiling of their relationships:
 
         # Sample of original skills (for reference) - showing all skills
         sample_skills = "\n".join(
-            [f"- {name}: {desc}" for name, desc in skill_store.items()]
+            [f"- {name}: {desc}" for name, desc in insight_store.items()]
         )
 
-        # Format all skills from skill_store (for reference)
-        all_skills_text = "\n".join(
-            [f"{name}: {desc}" for name, desc in skill_store.items()]
+        # Format all skills from insight_store (for reference)
+        all_insights_text = "\n".join(
+            [f"{name}: {desc}" for name, desc in insight_store.items()]
         )
 
         # Include full previous encyclopedia if available
@@ -551,10 +551,10 @@ Analyze these skills and build a profiling of their relationships:
                     if "general_skills" in enc_data:
                         for skill in enc_data["general_skills"]:
                             if isinstance(skill, dict):
-                                skill_name = skill.get("skill_name", "")
-                                skill_desc = skill.get("description", "")
-                                if skill_name and skill_desc:
-                                    enc_skills.append(f"{skill_name}: {skill_desc}")
+                                insight_name = skill.get("insight_name", "")
+                                insight_desc = skill.get("description", "")
+                                if insight_name and insight_desc:
+                                    enc_skills.append(f"{insight_name}: {insight_desc}")
                     elif isinstance(enc_data, dict):
                         # If it's a flat dictionary of skills
                         for name, desc in enc_data.items():
@@ -574,7 +574,7 @@ Analyze these skills and build a profiling of their relationships:
 You are extracting fundamental knowledge from a collection of problem-solving skills.
 
 **Context:**
-- Total skills collected from clients: {len(skill_store)}
+- Total skills collected from clients: {len(insight_store)}
 - These skills were derived from solving specific problems (bottom-up approach)
 - Your task is to extract multi-disciplinary, fundamental knowledge (top-down approach) which can be generalized to multi-domain problem-solving.
 - The extracted knowledge should be able to DERIVE and GUIDE the use of the collected skills
@@ -584,7 +584,7 @@ You are extracting fundamental knowledge from a collection of problem-solving sk
 {previous_encyclopedia_text if previous_encyclopedia_text else "None - this is the first encyclopedia"}
 
 **All Client Skills (New Skills to Integrate):**
-{all_skills_text}
+{all_insights_text}
 
 **Skill Clusters (from Step 2):**
 {clusters_text if clusters_text else "None identified"}
@@ -595,7 +595,7 @@ You are extracting fundamental knowledge from a collection of problem-solving sk
 **Your Task:**
 You have:
 1. Previous encyclopedia (existing general skills)
-2. All client skills (new specific skills from problem-solving) - {len(skill_store)} skills total
+2. All client skills (new specific skills from problem-solving) - {len(insight_store)} skills total
 
 **CRITICAL: Extract Many Fundamental and Cross-Domain Skills**
 
@@ -716,7 +716,7 @@ DO NOT create skills that are:
 
 **Critical Requirements (Based on Research):**
 1. **Comprehensive Extraction**: Extract fundamental skills comprehensively from ALL major clusters and domains. DO NOT create only a few skills - extract many fundamental and cross-domain skills that can guide the original skills.
-2. **Output Format**: Must be simple JSON with skill_name: description (exactly like client.py format)
+2. **Output Format**: Must be simple JSON with insight_name: description (exactly like client.py format)
 3. **Description Format**: Must include "When to use:" and "Step-by-step:" sections in the description string (same as client.py)
 4. **Knowledge Distillation**: Extract higher-level abstractions that preserve essential information while generalizing - extract from EACH cluster comprehensively, not just merge everything
 5. **Hierarchical Organization**: Create skills at different levels (fundamental → general → specific) where higher levels guide lower levels - extract skills at all levels comprehensively
@@ -739,7 +739,7 @@ DO NOT create skills that are:
 # Output Format:
 Output a simple JSON object with skill names as keys and descriptions as string values, exactly like client.py format:
 
-{{"skill_name": "description"}}
+{{"insight_name": "description"}}
 
 **Output your extracted knowledge as JSON only:**
 
@@ -747,13 +747,13 @@ Output a simple JSON object with skill names as keys and descriptions as string 
         return prompt
 
     def _step_knowledge_extraction(
-        self, skill_store: Dict, profiling: Dict, existing_encyclopedia: str = ""
+        self, insight_store: Dict, profiling: Dict, existing_encyclopedia: str = ""
     ) -> Dict:
         """Step 3: Extract general, fundamental knowledge"""
         print("Extracting general, fundamental knowledge...")
 
         prompt = self._get_knowledge_extraction_prompt(
-            skill_store, profiling, existing_encyclopedia
+            insight_store, profiling, existing_encyclopedia
         )
         system_prompt = None
 
@@ -769,7 +769,7 @@ Output a simple JSON object with skill names as keys and descriptions as string 
             print(
                 "Warning: Knowledge extraction output is not valid JSON. Falling back to collected skills."
             )
-            encyclopedia_dict = self._build_fallback_encyclopedia(skill_store)
+            encyclopedia_dict = self._build_fallback_encyclopedia(insight_store)
             json_content = json.dumps(encyclopedia_dict, indent=2, ensure_ascii=False)
 
         # Update encyclopedia (guaranteed to be JSON string)
@@ -834,11 +834,11 @@ Output a simple JSON object with skill names as keys and descriptions as string 
         except Exception:
             return None
 
-    def _build_fallback_encyclopedia(self, skill_store: Dict) -> Dict:
+    def _build_fallback_encyclopedia(self, insight_store: Dict) -> Dict:
         """Fallback encyclopedia: use collected skills when model output is not valid JSON"""
-        if not skill_store:
+        if not insight_store:
             return {}
-        return {name: desc for name, desc in skill_store.items() if desc}
+        return {name: desc for name, desc in insight_store.items() if desc}
 
     def _load_existing_encyclopedia(self, output_dir: str) -> str:
         """Load existing encyclopedia from output directory if it exists"""
@@ -875,10 +875,10 @@ Output a simple JSON object with skill names as keys and descriptions as string 
         print("\n" + "=" * 80)
         print("STEP 1: Collecting Skill Books")
         print("=" * 80)
-        collection_result = self.collect_skill_books(json_files)
+        collection_result = self.collect_insight_books(json_files)
         time.sleep(1)
 
-        if not self.skill_store:
+        if not self.insight_store:
             files_processed = collection_result.get("files_processed", 0)
             print(f"Warning: No skills found in {files_processed} collected files!")
             return {
@@ -892,7 +892,7 @@ Output a simple JSON object with skill names as keys and descriptions as string 
         print("\n" + "=" * 80)
         print("STEP 2: Text-Based Profiling of Skill Relationships")
         print("=" * 80)
-        profiling_result = self._step_text_profiling(self.skill_store)
+        profiling_result = self._step_text_profiling(self.insight_store)
         time.sleep(1)
 
         # Step 3: Knowledge Extraction
@@ -904,8 +904,8 @@ Output a simple JSON object with skill names as keys and descriptions as string 
         existing_encyclopedia = self._load_existing_encyclopedia(output_dir)
 
         extraction_result = self._step_knowledge_extraction(
-            self.skill_store,
-            self.skill_relationships,
+            self.insight_store,
+            self.insight_relationships,
             existing_encyclopedia,
         )
 
@@ -916,14 +916,14 @@ Output a simple JSON object with skill names as keys and descriptions as string 
             "extraction": extraction_result,
             "aggregation_steps": self.aggregation_steps,
             "encyclopedia": self.encyclopedia,
-            "skill_store": self.skill_store,  # Preserve original skills
-            "skill_relationships": self.skill_relationships,
+            "insight_store": self.insight_store,  # Preserve original skills
+            "insight_relationships": self.insight_relationships,
         }
 
         return result
 
     def save_results(self, result: Dict, output_dir: str = "math_output"):
-        """Save only encyclopedia.json with format {"skill_name": "description"}"""
+        """Save only encyclopedia.json with format {"insight_name": "description"}"""
         os.makedirs(output_dir, exist_ok=True)
         encyclopedia_path = os.path.join(output_dir, "encyclopedia.json")
 
@@ -939,7 +939,7 @@ Output a simple JSON object with skill names as keys and descriptions as string 
             print(
                 "Warning: Could not parse encyclopedia as JSON. Falling back to collected skills."
             )
-            encyclopedia_dict = self._build_fallback_encyclopedia(self.skill_store)
+            encyclopedia_dict = self._build_fallback_encyclopedia(self.insight_store)
 
         with open(encyclopedia_path, "w", encoding="utf-8") as f:
             json.dump(encyclopedia_dict, f, indent=2, ensure_ascii=False)
@@ -1011,7 +1011,7 @@ if __name__ == "__main__":
         print("\n" + "=" * 80)
         print("AGGREGATION COMPLETE")
         print("=" * 80)
-        print(f"Total skills collected: {len(server.skill_store)}")
+        print(f"Total skills collected: {len(server.insight_store)}")
         print(f"Encyclopedia length: {len(server.encyclopedia)} characters")
         print(f"Output directory: {args.output_dir}")
 

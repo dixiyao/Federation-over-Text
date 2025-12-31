@@ -1,7 +1,7 @@
 """
 Multi-dataset Math Problem Solving Pipeline (math_domain)
-- Supports running STEP 1 (skill extraction) across multiple datasets.
-- Allows choosing which skill sets to aggregate in STEP 2.
+- Supports running STEP 1 (insight extraction) across multiple datasets.
+- Allows choosing which insight sets to aggregate in STEP 2.
 - Evaluates multiple target datasets sequentially in STEP 3 using the shared encyclopedia.
 
 Usage is similar to math_pipeline.py but adds list-style arguments.
@@ -74,8 +74,8 @@ except ImportError:
 
 from client import ChainOfThoughtReader
 from math_datasets.utils import extract_numbers
-from server import SkillAggregationServer
-from server_text import TextBasedSkillAggregationServer
+from server import InsightAggregationServer
+from server_text import TextBasedInsightAggregationServer
 
 # Dataset registry: (source, path_or_hf_name, data_dir_or_col_map, split_or_none)
 # - source="hf": use Hugging Face with (hf_name, data_dir, split)
@@ -142,8 +142,8 @@ class MathDomainPipeline:
         os.makedirs(output_dir, exist_ok=True)
 
         self.client: Optional[ChainOfThoughtReader] = None
-        self.server: Optional[SkillAggregationServer] = None
-        self.server_text: Optional[TextBasedSkillAggregationServer] = None
+        self.server: Optional[InsightAggregationServer] = None
+        self.server_text: Optional[TextBasedInsightAggregationServer] = None
         self.encyclopedia_loaded = False
 
     # ------------------------------------------------------------------
@@ -351,7 +351,7 @@ class MathDomainPipeline:
         raise ValueError(f"Unknown source type: {source_type}")
 
     # ------------------------------------------------------------------
-    # STEP 1: Skill extraction across multiple datasets
+    # STEP 1: Insight extraction across multiple datasets
     # ------------------------------------------------------------------
     def _ensure_client(self):
         if self.client is None:
@@ -362,7 +362,7 @@ class MathDomainPipeline:
                 gemini_api_key=self.gemini_api_key,
             )
 
-    def _extract_skills_for_dataset(
+    def _extract_insights_for_dataset(
         self,
         dataset_name: str,
         problems: List[Dict],
@@ -370,25 +370,25 @@ class MathDomainPipeline:
         encyclopedia_path: Optional[str] = None,
         iteration: int = 0,
     ) -> Tuple[str, List[Dict]]:
-        """Extract skills from dataset, optionally solving with encyclopedia first.
+        """Extract insights from dataset, optionally solving with encyclopedia first.
 
         Args:
             dataset_name: Name of dataset
             problems: List of problems
             max_problems: Max problems to process
-            encyclopedia_path: If provided, solve with encyclopedia before extracting skills
+            encyclopedia_path: If provided, solve with encyclopedia before extracting insights
             iteration: Current iteration number (for logging)
 
         Returns:
-            Tuple of (skills_dir, results_list)
+            Tuple of (insights_dir, results_list)
         """
         self._ensure_client()
-        skills_dir = os.path.join(self.output_dir, dataset_name)
-        os.makedirs(skills_dir, exist_ok=True)
+        insights_dir = os.path.join(self.output_dir, dataset_name)
+        os.makedirs(insights_dir, exist_ok=True)
 
         worklist = problems[:max_problems] if max_problems else problems
         print(
-            f"\nIteration {iteration}: Extracting skills for {dataset_name} ({len(worklist)} problems)..."
+            f"\nIteration {iteration}: Extracting insights for {dataset_name} ({len(worklist)} problems)..."
         )
 
         # If encyclopedia provided, load it into client for solving
@@ -458,24 +458,24 @@ class MathDomainPipeline:
                     }
                 )
 
-            # Extract skills
+            # Extract insights
             try:
                 result = self.client.read_paper(task=problem_text, paper_content=None)
-                skill_book = result.get("behavior_book", {})
-                if skill_book:
-                    skill_book = {
+                insight_book = result.get("behavior_book", {})
+                if insight_book:
+                    insight_book = {
                         k: v
-                        for k, v in skill_book.items()
-                        if not k.startswith("skill_fallback")
+                        for k, v in insight_book.items()
+                        if not k.startswith("insight_fallback")
                     }
-                if not skill_book:
-                    print("    No skills extracted")
+                if not insight_book:
+                    print("    No insights extracted")
                     continue
 
                 output_data = {
                     "problem": problem_text,
                     "problem_id": problem_data.get("id", idx),
-                    "behavior_book": skill_book,
+                    "behavior_book": insight_book,
                     "iteration": iteration,
                     "predicted_answer": (
                         predicted_answer if predicted_answer is not None else ""
@@ -496,43 +496,43 @@ class MathDomainPipeline:
                         }
                     )
 
-                output_path = os.path.join(skills_dir, f"problem_{idx:04d}.json")
+                output_path = os.path.join(insights_dir, f"problem_{idx:04d}.json")
                 with open(output_path, "w", encoding="utf-8") as f:
                     json.dump(output_data, f, indent=2, ensure_ascii=False)
-                print(f"    Saved {len(skill_book)} skills -> {output_path}")
+                print(f"    Saved {len(insight_book)} insights -> {output_path}")
                 time.sleep(0.5)
             except Exception as exc:  # noqa: BLE001
                 print(f"    Error processing problem {idx}: {exc}")
 
-        return skills_dir, results
+        return insights_dir, results
 
-    def learn_skills_from_datasets(
+    def learn_insights_from_datasets(
         self,
         dataset_names: List[str],
         max_problems: Optional[int],
         encyclopedia_path: Optional[str] = None,
         iteration: int = 0,
     ) -> Tuple[Dict[str, str], List[Dict]]:
-        """Learn skills from datasets, optionally solving with encyclopedia first.
+        """Learn insights from datasets, optionally solving with encyclopedia first.
 
         Returns:
-            Tuple of (skills_map, all_results)
+            Tuple of (insights_map, all_results)
         """
         if not dataset_names:
             raise ValueError("Provide at least one dataset for STEP 1.")
 
-        skills_map: Dict[str, str] = {}
+        insights_map: Dict[str, str] = {}
         all_results = []
         for name in dataset_names:
             problems = self.load_math_dataset(name)
-            skills_dir, results = self._extract_skills_for_dataset(
+            insights_dir, results = self._extract_insights_for_dataset(
                 name, problems, max_problems, encyclopedia_path, iteration
             )
-            skills_map[name] = skills_dir
+            insights_map[name] = insights_dir
             all_results.extend(results)
 
         print("\nFinished STEP 1 across datasets:")
-        for name, path in skills_map.items():
+        for name, path in insights_map.items():
             print(f"  - {name}: {path}")
 
         if all_results:
@@ -542,38 +542,38 @@ class MathDomainPipeline:
                 f"\nIteration {iteration} Accuracy: {num_correct}/{len(all_results)} = {accuracy:.2%}"
             )
 
-        return skills_map, all_results
+        return insights_map, all_results
 
     # ------------------------------------------------------------------
-    # STEP 2: Aggregate chosen skills into one encyclopedia
+    # STEP 2: Aggregate chosen insights into one encyclopedia
     # ------------------------------------------------------------------
-    def aggregate_skills(self, skill_sets: List[str], r1: float, r2: float) -> str:
-        if not skill_sets:
+    def aggregate_insights(self, insight_sets: List[str], r1: float, r2: float) -> str:
+        if not insight_sets:
             raise ValueError("Provide at least one dataset to aggregate in STEP 2.")
 
         json_files: List[str] = []
-        for name in skill_sets:
-            skills_dir = os.path.join(self.output_dir, name)
-            if not os.path.isdir(skills_dir):
+        for name in insight_sets:
+            insights_dir = os.path.join(self.output_dir, name)
+            if not os.path.isdir(insights_dir):
                 raise FileNotFoundError(
-                    f"Skills directory not found for {name}: {skills_dir}"
+                    f"Insights directory not found for {name}: {insights_dir}"
                 )
             dataset_files = [
-                os.path.join(skills_dir, f)
-                for f in os.listdir(skills_dir)
+                os.path.join(insights_dir, f)
+                for f in os.listdir(insights_dir)
                 if f.endswith(".json") and f.startswith("problem_")
             ]
             json_files.extend(sorted(dataset_files))
 
         if not json_files:
-            raise FileNotFoundError("No skill JSON files found for aggregation.")
+            raise FileNotFoundError("No insight JSON files found for aggregation.")
 
-        print("\nAggregating skills from:")
-        for name in skill_sets:
+        print("\nAggregating insights from:")
+        for name in insight_sets:
             print(f"  - {name}")
 
         if self.mode == "text":
-            self.server_text = TextBasedSkillAggregationServer(
+            self.server_text = TextBasedInsightAggregationServer(
                 model_name=self.model_name,
                 device=self.device,
                 input_dir=self.output_dir,
@@ -586,7 +586,7 @@ class MathDomainPipeline:
             self.server_text.save_results(result, output_dir=self.output_dir)
             encyclopedia_path = os.path.join(self.output_dir, "encyclopedia.json")
         else:
-            self.server = SkillAggregationServer(
+            self.server = InsightAggregationServer(
                 model_name=self.model_name,
                 device=self.device,
                 input_dir=self.output_dir,
@@ -605,7 +605,7 @@ class MathDomainPipeline:
     # ------------------------------------------------------------------
     # STEP 3: Solve multiple target datasets using one encyclopedia (DEPRECATED)
     # ------------------------------------------------------------------
-    # NOTE: In iterative mode, solving is now integrated into _extract_skills_for_dataset
+    # NOTE: In iterative mode, solving is now integrated into _extract_insights_for_dataset
     # Standard mode can still use this if needed, but iterative mode handles everything
     # through the client with encyclopedia support
 
@@ -623,8 +623,8 @@ class MathDomainPipeline:
 
         Each iteration:
         1. Use encyclopedia (from previous iteration) to solve problems and log accuracy
-        2. Extract skills from the same problems
-        3. Aggregate skills into new encyclopedia
+        2. Extract insights from the same problems
+        3. Aggregate insights into new encyclopedia
         4. Repeat
 
         Args:
@@ -654,8 +654,8 @@ class MathDomainPipeline:
             print(f"ITERATION {iteration}/{self.num_iterations}")
             print(f"{'='*80}")
 
-            # STEP 1: Extract skills (and solve if encyclopedia exists)
-            skills_map, results = self.learn_skills_from_datasets(
+            # STEP 1: Extract insights (and solve if encyclopedia exists)
+            insights_map, results = self.learn_insights_from_datasets(
                 dataset_list, max_problems, encyclopedia_path, iteration
             )
 
@@ -666,9 +666,9 @@ class MathDomainPipeline:
                 num_correct = sum(1 for r in results if r["is_correct"])
                 accuracy = num_correct / len(results)
 
-            # STEP 2: Aggregate skills into encyclopedia
-            print(f"\nIteration {iteration}: Aggregating skills...")
-            encyclopedia_path = self.aggregate_skills(dataset_list, r1=r1, r2=r2)
+            # STEP 2: Aggregate insights into encyclopedia
+            print(f"\nIteration {iteration}: Aggregating insights...")
+            encyclopedia_path = self.aggregate_insights(dataset_list, r1=r1, r2=r2)
 
             # Save iteration results
             iteration_dir = os.path.join(self.output_dir, f"iteration_{iteration}")
@@ -843,7 +843,7 @@ def _parse_list_arg(raw: Optional[List[str]]) -> Optional[List[str]]:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Iterative math learning pipeline: solve (if encyclopedia available) + extract skills + aggregate → repeat"
+        description="Iterative math learning pipeline: solve (if encyclopedia available) + extract insights + aggregate → repeat"
     )
     parser.add_argument(
         "--datasets",
@@ -875,10 +875,10 @@ def main():
         help="Root output directory.",
     )
     parser.add_argument(
-        "--r1", type=float, default=0.95, help="r1 threshold for same skills."
+        "--r1", type=float, default=0.95, help="r1 threshold for same insights."
     )
     parser.add_argument(
-        "--r2", type=float, default=0.6, help="r2 threshold for linked skills."
+        "--r2", type=float, default=0.6, help="r2 threshold for linked insights."
     )
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
     parser.add_argument(

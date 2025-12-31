@@ -86,7 +86,7 @@ class GenerateServer:
         self.embedding_model_name = "BAAI/bge-base-en-v1.5"
 
         # System prompt for text mode
-        self.system_prompt = "Using the skill set as the help, when necessary please refer to the skills and guide you resolve question."
+        self.system_prompt = "Using the insight set as the help, when necessary please refer to the insights and guide you resolve question."
 
     def _check_cuda(self) -> bool:
         """Check if CUDA is available"""
@@ -153,7 +153,7 @@ class GenerateServer:
                 # Convert to string format for compatibility
                 self.encyclopedia = json.dumps(self.encyclopedia_dict, indent=2)
                 print(
-                    f"Loaded encyclopedia.json from {encyclopedia_path} ({len(self.encyclopedia_dict)} skills)"
+                    f"Loaded encyclopedia.json from {encyclopedia_path} ({len(self.encyclopedia_dict)} insights)"
                 )
             else:
                 # Normal mode: Load encyclopedia.txt and GraphRAG database
@@ -227,8 +227,8 @@ class GenerateServer:
             print(f"Warning: Failed to load GraphRAG database: {e}")
             self.graphrag_db = None
 
-    def _retrieve_skills_rag(self, query: str, top_k: int = 10) -> List[Dict]:
-        """Retrieve relevant skills using GraphRAG (graph traversal + similarity search)"""
+    def _retrieve_insights_rag(self, query: str, top_k: int = 10) -> List[Dict]:
+        """Retrieve relevant insights using GraphRAG (graph traversal + similarity search)"""
         if not self.graphrag_db:
             print("Warning: GraphRAG database not available. Cannot retrieve skills.")
             return []
@@ -341,7 +341,7 @@ class GenerateServer:
         # Report which skills were retrieved
         if final_skills:
             print(
-                f"Retrieved {len(final_skills)} skills: {[s['skill_name'] for s in final_skills]}"
+                f"Retrieved insights: {[s['skill_name'] for s in final_skills]}"
             )
         else:
             print("Warning: No valid skills retrieved after validation")
@@ -369,7 +369,7 @@ class GenerateServer:
                 skills_list.append(f"**{skill_name}**:\n{skill_desc}")
 
             skills_text = "\n\n".join(skills_list)
-            skills_section = f"""Skills Encyclopedia:
+            skills_section = f"""Insights Encyclopedia:
 
 {skills_text}
 
@@ -396,7 +396,7 @@ Based on the relevant skills above, provide a clear and comprehensive answer to 
             skills_text = ""
 
             if self.graphrag_db:
-                retrieved_skills = self._retrieve_skills_rag(query, top_k=10)
+                retrieved_skills = self._retrieve_insights_rag(query, top_k=10)
                 if retrieved_skills:
                     # Format skills with clear structure
                     skills_list = []
@@ -413,7 +413,7 @@ Based on the relevant skills above, provide a clear and comprehensive answer to 
 
                     if skills_list:
                         skills_text = "\n\n".join(skills_list)
-                        skills_section = f"""Relevant Skills to Guide Your Solution:
+                        skills_section = f"""Relevant Insights to Guide Your Solution:
 
 {skills_text}
 
@@ -428,7 +428,7 @@ Based on the relevant skills above, provide a clear and comprehensive answer to 
             else:
                 # Fallback to full encyclopedia if GraphRAG not available
                 if self.encyclopedia:
-                    skills_section = f"""Skills Encyclopedia:
+                    skills_section = f"""Insights Encyclopedia:
 {self.encyclopedia}
 
 """
@@ -617,7 +617,7 @@ Based on the relevant skills above, provide a clear and comprehensive answer to 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Generate Server - Answer queries using the Skills Encyclopedia"
+        description="Generate Server - Answer queries using the Insights Encyclopedia"
     )
     parser.add_argument(
         "-e",

@@ -2,7 +2,7 @@
 Behavior Curation Pipeline Client
 Implements metacognitive reuse for LLM reasoning based on:
 "Metacognitive Reuse: Turning Recurring LLM Reasoning Into Concise Behaviors"
-Uses a three-stage pipeline: Solution → Reflection → Behavior Extraction
+Uses a three-stage pipeline: Solution → Reflection → Insight Extraction
 """
 
 import argparse
@@ -29,7 +29,7 @@ class ChainOfThoughtReader:
     """
     A client that reads papers using behavior curation pipeline based on
     "Metacognitive Reuse: Turning Recurring LLM Reasoning Into Concise Behaviors"
-    Implements three-stage pipeline: Solution → Reflection → Behavior Extraction
+    Implements three-stage pipeline: Solution → Reflection → Insight Extraction
     """
 
     def __init__(
@@ -50,7 +50,7 @@ class ChainOfThoughtReader:
             task
             or "Analyze this paper and identify key contributions, limitations, and potential future research directions."
         )
-        self.behavior_book = {}  # Store extracted behaviors
+        self.insight_book = {}  # Store extracted behaviors
 
         # Encyclopedia support (for solving with learned skills)
         self.encyclopedia = ""
@@ -384,8 +384,8 @@ class ChainOfThoughtReader:
         if self.encyclopedia_dict:
             # Text mode: Format from dictionary
             skills_list = []
-            for skill_name, skill_desc in self.encyclopedia_dict.items():
-                skills_list.append(f"**{skill_name}**:\\n{skill_desc}")
+            for insight_name, insight_desc in self.encyclopedia_dict.items():
+                skills_list.append(f"**{insight_name}**:\\n{insight_desc}")
             skills_text = "\\n\\n".join(skills_list)
         else:
             # Normal mode: Use raw encyclopedia text
@@ -518,11 +518,11 @@ Identify and extract all reusable skills, techniques, and methods used in the so
 **Output Format (Simple JSON):**
 Output a simple JSON object with skill names as keys and descriptions as string values:
 
-{{"skill_name": "description"}}
+{{"insight_name": "description"}}
 
 Format Rules:
 - Use valid JSON format
-- Each skill name must start with "skill_"
+- Each skill name must start with "insight_"
 - Each description is a single string containing: "When to use:" and "Step-by-step:" sections
 - Steps must be numbered: 1) 2) 3)
 - Keep JSON simple - no nested objects, just key-value pairs
@@ -530,8 +530,8 @@ Format Rules:
 
 **Example:**
 {{
-  "skill_polynomialFactoring": "When to use: When solving equations with polynomial expressions that can be factored, especially when the polynomial has recognizable patterns like difference of squares (a²-b²), perfect square trinomials (a²±2ab+b²), or common factors. This skill is particularly useful for quadratic and higher-degree polynomial equations where factoring can simplify the problem. Step-by-step: 1) Examine the polynomial structure carefully to identify common patterns such as difference of squares where a²-b²=(a-b)(a+b), perfect square trinomials where a²+2ab+b²=(a+b)² or a²-2ab+b²=(a-b)², and common factors that can be factored out using the distributive property 2) Apply the appropriate factoring technique based on the identified pattern - for difference of squares use (a-b)(a+b), for perfect squares use (a±b)², and for common factors factor out the greatest common divisor 3) Set each factor equal to zero to create simpler equations that are easier to solve, using the zero product property which states that if ab=0 then either a=0 or b=0 4) Solve the resulting linear or quadratic equations using standard algebraic methods such as isolating the variable or applying the quadratic formula if needed 5) Verify all solutions by substituting them back into the original equation to ensure they satisfy the equation and check for extraneous solutions that may have been introduced. Key insights: Factoring reduces complex polynomials to simpler equations. Always look for patterns first before attempting brute force methods.",
-  "skill_systematicSubstitution": "When to use: When dealing with systems of equations or complex expressions with multiple variables where one variable can be expressed in terms of others, making the problem more manageable. This approach is especially effective when one equation is already solved for a variable or can be easily rearranged. Step-by-step: 1) Identify which variable to substitute by finding the simplest relationship - look for equations where one variable is already isolated or can be easily isolated, prefer variables with coefficient 1 or -1 2) Express one variable in terms of others from one equation - solve for the chosen variable explicitly, ensuring the expression is valid for all values in the domain 3) Substitute this expression into other equations in the system, replacing all instances of the substituted variable with the expression, being careful to maintain parentheses when the expression contains multiple terms 4) Simplify the resulting equation(s) to reduce the number of variables and create a more solvable form, combining like terms and applying algebraic operations 5) Solve for the remaining variable(s) using appropriate algebraic techniques such as linear equation solving, quadratic formula, or other methods depending on the equation type 6) Back-substitute to find the values of all variables by plugging the solved values back into the substitution expression, working backwards through the system 7) Verify the solution satisfies all original equations by checking each equation with the found values, ensuring no arithmetic errors were made. Key insights: Substitution reduces multi-variable problems to single-variable problems. Choose the substitution that simplifies the most complex parts first."
+  "insight_polynomialFactoring": "When to use: When solving equations with polynomial expressions that can be factored, especially when the polynomial has recognizable patterns like difference of squares (a²-b²), perfect square trinomials (a²±2ab+b²), or common factors. This skill is particularly useful for quadratic and higher-degree polynomial equations where factoring can simplify the problem. Step-by-step: 1) Examine the polynomial structure carefully to identify common patterns such as difference of squares where a²-b²=(a-b)(a+b), perfect square trinomials where a²+2ab+b²=(a+b)² or a²-2ab+b²=(a-b)², and common factors that can be factored out using the distributive property 2) Apply the appropriate factoring technique based on the identified pattern - for difference of squares use (a-b)(a+b), for perfect squares use (a±b)², and for common factors factor out the greatest common divisor 3) Set each factor equal to zero to create simpler equations that are easier to solve, using the zero product property which states that if ab=0 then either a=0 or b=0 4) Solve the resulting linear or quadratic equations using standard algebraic methods such as isolating the variable or applying the quadratic formula if needed 5) Verify all solutions by substituting them back into the original equation to ensure they satisfy the equation and check for extraneous solutions that may have been introduced. Key insights: Factoring reduces complex polynomials to simpler equations. Always look for patterns first before attempting brute force methods.",
+  "insight_systematicSubstitution": "When to use: When dealing with systems of equations or complex expressions with multiple variables where one variable can be expressed in terms of others, making the problem more manageable. This approach is especially effective when one equation is already solved for a variable or can be easily rearranged. Step-by-step: 1) Identify which variable to substitute by finding the simplest relationship - look for equations where one variable is already isolated or can be easily isolated, prefer variables with coefficient 1 or -1 2) Express one variable in terms of others from one equation - solve for the chosen variable explicitly, ensuring the expression is valid for all values in the domain 3) Substitute this expression into other equations in the system, replacing all instances of the substituted variable with the expression, being careful to maintain parentheses when the expression contains multiple terms 4) Simplify the resulting equation(s) to reduce the number of variables and create a more solvable form, combining like terms and applying algebraic operations 5) Solve for the remaining variable(s) using appropriate algebraic techniques such as linear equation solving, quadratic formula, or other methods depending on the equation type 6) Back-substitute to find the values of all variables by plugging the solved values back into the substitution expression, working backwards through the system 7) Verify the solution satisfies all original equations by checking each equation with the found values, ensuring no arithmetic errors were made. Key insights: Substitution reduces multi-variable problems to single-variable problems. Choose the substitution that simplifies the most complex parts first."
 }}
 
 **CRITICAL Requirements:**
@@ -540,7 +540,7 @@ Format Rules:
 3. Each skill must have a "When to use:" section and "Step-by-step:" section in the description
 4. Output ONLY valid JSON - no markdown, no code blocks, no extra text
 5. Escape all double quotes inside descriptions with backslash (\\")
-6. Each skill name must start with "skill_"
+6. Each skill name must start with "insight_"
 7. Be thorough - if a technique was used, extract it as a skill
 
 **Output your response as a valid JSON object only:**
@@ -657,28 +657,28 @@ Format Rules:
                     json_data = json.loads(json_str)
 
                     if isinstance(json_data, dict):
-                        for skill_name, skill_desc in json_data.items():
-                            # Ensure skill name starts with skill_
-                            if not skill_name.startswith("skill_"):
-                                skill_name = f"skill_{skill_name}"
+                        for insight_name, insight_desc in json_data.items():
+                            # Ensure skill name starts with insight_
+                            if not insight_name.startswith("insight_"):
+                                insight_name = f"insight_{insight_name}"
 
                             # Convert to string and normalize
-                            if isinstance(skill_desc, dict):
-                                skill_desc = str(skill_desc)
-                            elif isinstance(skill_desc, list):
-                                skill_desc = " ".join(str(item) for item in skill_desc)
-                            elif not isinstance(skill_desc, str):
-                                skill_desc = str(skill_desc)
+                            if isinstance(insight_desc, dict):
+                                insight_desc = str(insight_desc)
+                            elif isinstance(insight_desc, list):
+                                insight_desc = " ".join(str(item) for item in insight_desc)
+                            elif not isinstance(insight_desc, str):
+                                insight_desc = str(insight_desc)
 
                             # Normalize whitespace
-                            skill_desc = re.sub(r"\s+", " ", skill_desc).strip()
+                            insight_desc = re.sub(r"\s+", " ", insight_desc).strip()
 
                             # Validate
-                            if len(skill_desc) >= 20:
-                                skills[skill_name] = skill_desc
+                            if len(insight_desc) >= 20:
+                                skills[insight_name] = insight_desc
                             else:
                                 validation_errors.append(
-                                    f"Skill '{skill_name}' has too short description"
+                                    f"Skill '{insight_name}' has too short description"
                                 )
 
                 except json.JSONDecodeError as e:
@@ -688,21 +688,21 @@ Format Rules:
             # Method 3: Fallback - extract using regex if JSON parsing failed
             if not skills:
                 print("Warning: JSON parsing failed. Attempting regex extraction.")
-                # Extract skill_name: "description" patterns
-                skill_pattern = r'"skill_\w+"\s*:\s*"((?:[^"\\]|\\.)*)"'
-                name_pattern = r'"skill_\w+"'
+                # Extract insight_name: "description" patterns
+                insight_pattern = r'"insight_\w+"\s*:\s*"((?:[^"\\]|\\.)*)"'
+                name_pattern = r'"insight_\w+"'
                 names = re.findall(name_pattern, response)
-                descriptions = re.findall(skill_pattern, response)
+                descriptions = re.findall(insight_pattern, response)
 
                 for i, name in enumerate(names):
                     if i < len(descriptions):
-                        skill_name = name.strip('"')
-                        skill_desc = (
+                        insight_name = name.strip('"')
+                        insight_desc = (
                             descriptions[i].replace('\\"', '"').replace("\\n", " ")
                         )
-                        skill_desc = re.sub(r"\s+", " ", skill_desc).strip()
-                        if len(skill_desc) >= 20:
-                            skills[skill_name] = skill_desc
+                        insight_desc = re.sub(r"\s+", " ", insight_desc).strip()
+                        if len(insight_desc) >= 20:
+                            skills[insight_name] = insight_desc
 
         except Exception as e:
             print(f"Warning: Error parsing skills: {e}")
@@ -714,7 +714,7 @@ Format Rules:
         # Filter valid skills
         valid_skills = {}
         for k, v in skills.items():
-            if not k.startswith("skill_"):
+            if not k.startswith("insight_"):
                 continue
             if isinstance(v, str) and len(v.strip()) >= 20:
                 valid_skills[k] = v
@@ -781,7 +781,7 @@ Please answer the user's question based on the paper content provided above."""
 
         # Reset reasoning steps and behavior book
         self.reasoning_steps = []
-        self.behavior_book = {}
+        self.insight_book = {}
 
         # Step 1: Solution Generation
         print("Step 1: Generating solution...")
@@ -800,10 +800,10 @@ Please answer the user's question based on the paper content provided above."""
         step3 = self._step_behavior_extraction(problem, solution, reflection)
         time.sleep(1)
 
-        # Update behavior_book with extracted skills
+        # Update insight_book with extracted skills
         extracted_skills = step3.get("valid_skills", step3.get("skills", {}))
         if extracted_skills:
-            self.behavior_book.update(extracted_skills)
+            self.insight_book.update(extracted_skills)
             print(f"Added {len(extracted_skills)} skills to skill book")
         else:
             print("WARNING: No skills extracted from this problem!")
@@ -819,7 +819,7 @@ Please answer the user's question based on the paper content provided above."""
                 step3.get("valid_skills", step3.get("skills", {})).keys()
             ),
             "validation_errors": step3.get("validation_errors", []),
-            "behavior_book": self.behavior_book,
+            "insight_book": self.insight_book,
             "total_steps": len(self.reasoning_steps),
         }
 
@@ -889,14 +889,14 @@ Please answer the user's question based on the paper content provided above."""
                 result["paper_name"] = paper_name
                 result["paper_index"] = idx
 
-                # Save only skill book as simple JSON: {"skill_name": "description"}
-                skill_book = result.get("behavior_book", {})
-                if skill_book:
+                # Save only skill book as simple JSON: {"insight_name": "description"}
+                insight_book = result.get("insight_book", {})
+                if insight_book:
                     output_path = output_dir / f"paper_{idx:02d}.json"
                     with open(output_path, "w", encoding="utf-8") as f:
-                        json.dump(skill_book, f, indent=2, ensure_ascii=False)
+                        json.dump(insight_book, f, indent=2, ensure_ascii=False)
                     print(f"Saved skill book to: {output_path}")
-                    print(f"Skills extracted: {len(skill_book)}")
+                    print(f"Skills extracted: {len(insight_book)}")
                 else:
                     print(f"No skills extracted from {paper_name}")
                 print("-" * 80)
@@ -912,7 +912,7 @@ Please answer the user's question based on the paper content provided above."""
 
         print(f"\n{'='*80}")
         print(f"Completed processing {len(all_results)}/{len(pdf_files)} papers")
-        total_skills = sum(len(r.get("behavior_book", {})) for r in all_results)
+        total_skills = sum(len(r.get("insight_book", {})) for r in all_results)
         print(f"Total skills extracted: {total_skills}")
         print(f"{'='*80}")
 
@@ -930,13 +930,13 @@ Please answer the user's question based on the paper content provided above."""
         return "\n".join(formatted)
 
     def save_reasoning(self, reasoning_result: Dict, output_path: Optional[str] = None):
-        """Save only skill book as simple JSON: {"skill_name": "description"}"""
+        """Save only skill book as simple JSON: {"insight_name": "description"}"""
         # Ensure output directory exists
         output_dir = Path(self.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        skill_book = reasoning_result.get("behavior_book", {})
-        if not skill_book:
+        insight_book = reasoning_result.get("insight_book", {})
+        if not insight_book:
             print("No skills to save")
             return
 
@@ -957,7 +957,7 @@ Please answer the user's question based on the paper content provided above."""
 
         # Save only skill book as simple JSON
         with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(skill_book, f, indent=2, ensure_ascii=False)
+            json.dump(insight_book, f, indent=2, ensure_ascii=False)
 
         print(f"Saved skill book to: {output_path}")
 
@@ -1064,8 +1064,8 @@ if __name__ == "__main__":
                 print("\n" + "=" * 80)
                 print("EXTRACTED SKILLS")
                 print("=" * 80)
-                for skill_name, skill_desc in result.get("behavior_book", {}).items():
-                    print(f"\n{skill_name}: {skill_desc}")
+                for insight_name, insight_desc in result.get("insight_book", {}).items():
+                    print(f"\n{insight_name}: {insight_desc}")
                 print("\n" + "=" * 80)
         else:
             # Process multiple papers
@@ -1092,7 +1092,7 @@ if __name__ == "__main__":
                 print("ALL PAPERS PROCESSED")
                 print("=" * 80)
                 print(f"Total papers processed: {len(results)}")
-                total_skills = sum(len(r.get("behavior_book", {})) for r in results)
+                total_skills = sum(len(r.get("insight_book", {})) for r in results)
                 print(f"Total skills extracted: {total_skills}")
                 print("=" * 80)
             else:

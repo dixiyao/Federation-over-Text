@@ -1,7 +1,7 @@
 """
-Skill Aggregation Server
-Implements the aggregation phase for building an Encyclopedia from multiple skill books.
-Follows the pipeline: Collect Skill Books → Aggregate Skill Store → Reflection → Encyclopedia Chapter → Encyclopedia
+Insight Aggregation Server
+Implements the aggregation phase for building an Encyclopedia from multiple insight books.
+Follows the pipeline: Collect Insight Books → Aggregate Insight Store → Reflection → Encyclopedia Chapter → Encyclopedia
 """
 
 import argparse
@@ -40,9 +40,9 @@ except ImportError:
     print("Warning: networkx not installed. GraphRAG features will be limited.")
 
 
-class SkillAggregationServer:
+class InsightAggregationServer:
     """
-    Server that aggregates skill books from multiple client results
+    Server that aggregates insight books from multiple client results
     and constructs an Encyclopedia through reflection and synthesis.
     """
 
@@ -56,9 +56,9 @@ class SkillAggregationServer:
     ):
         self.model_name = model_name
         self.input_dir = input_dir
-        self.skill_store = (
+        self.insight_store = (
             {}
-        )  # Aggregated skill store (compatible with behavior_book from client)
+        )  # Aggregated insight store (compatible with behavior_book from client)
         self.encyclopedia = ""  # Final encyclopedia
         self.aggregation_steps = []
 
@@ -295,15 +295,15 @@ class SkillAggregationServer:
         except Exception as e:
             raise RuntimeError(f"Error calling Gemini API: {e}")
 
-    def collect_skill_books(self, json_files: Optional[List[str]] = None) -> Dict:
+    def collect_insight_books(self, json_files: Optional[List[str]] = None) -> Dict:
         """
-        Step 1: Collect skill books from multiple client result JSON files sequentially.
+        Step 1: Collect insight books from multiple client result JSON files sequentially.
 
         Args:
             json_files: List of JSON file paths. If None, scans input_dir for JSON files.
 
         Returns:
-            Dictionary containing collected skill books and metadata.
+            Dictionary containing collected insight books and metadata.
         """
         if json_files is None:
             # Scan input directory for JSON files
@@ -323,8 +323,8 @@ class SkillAggregationServer:
         print(f"Collecting skill books from {len(json_files)} files...")
 
         collected_books = {}
-        all_skills = {}
-        skill_counts = {}  # Track how many times each skill appears
+        all_insights = {}
+        insight_counts = {}  # Track how many times each skill appears
         total_skills_count = 0  # Total count including duplicates
         problems = []
 
@@ -336,97 +336,97 @@ class SkillAggregationServer:
 
                 # Extract skill book (client.py uses "behavior_book" key but contains skills)
                 # Handle both dict and list formats
-                skill_book_raw = (
+                insight_book_raw = (
                     data.get("behavior_book")
                     or data.get("behaviors")
                     or data.get("skills")
                 )
 
                 # Convert list format to dict if needed
-                skill_book = {}
-                if isinstance(skill_book_raw, dict):
-                    skill_book = skill_book_raw
-                elif isinstance(skill_book_raw, list):
+                insight_book = {}
+                if isinstance(insight_book_raw, dict):
+                    insight_book = insight_book_raw
+                elif isinstance(insight_book_raw, list):
                     # Convert list of dicts to dict format
                     # Expected format: [{"behavior": "name", "description": "desc"}, ...]
-                    for item in skill_book_raw:
+                    for item in insight_book_raw:
                         if isinstance(item, dict):
                             # Try different key names
-                            skill_name = (
+                            insight_name = (
                                 item.get("behavior")
                                 or item.get("skill")
                                 or item.get("name")
                             )
-                            skill_desc = item.get("description") or item.get("desc")
-                            if skill_name and skill_desc:
+                            insight_desc = item.get("description") or item.get("desc")
+                            if insight_name and insight_desc:
                                 # Ensure skill name starts with "skill_" prefix
-                                if not skill_name.startswith("skill_"):
-                                    skill_name = f"skill_{skill_name}"
-                                skill_book[skill_name] = skill_desc
-                elif isinstance(data, dict) and not skill_book_raw:
+                                if not insight_name.startswith("skill_"):
+                                    insight_name = f"skill_{insight_name}"
+                                insight_book[insight_name] = insight_desc
+                elif isinstance(data, dict) and not insight_book_raw:
                     # Check if data itself is a skill book (direct format from client.py)
                     # If all keys start with "skill_" or most keys are strings with descriptions
-                    skill_keys = [
+                    insight_keys = [
                         k
                         for k in data.keys()
                         if isinstance(k, str) and k.startswith("skill_")
                     ]
-                    if len(skill_keys) > 0 and len(skill_keys) >= len(data) * 0.8:
+                    if len(insight_keys) > 0 and len(insight_keys) >= len(data) * 0.8:
                         # This is likely a direct skill book dictionary
-                        skill_book = data
+                        insight_book = data
                     elif all(
                         isinstance(v, str) and len(v) > 20
                         for v in data.values()
                         if isinstance(v, str)
                     ):
                         # All values are strings (likely descriptions), treat as skill book
-                        skill_book = data
+                        insight_book = data
 
-                if skill_book:
+                if insight_book:
                     filename = Path(json_file).stem
                     collected_books[filename] = {
                         "problem": data.get("problem", "Unknown"),
-                        "skill_book": skill_book,
-                        "behavior_book": skill_book,  # Keep for compatibility
+                        "insight_book": insight_book,
+                        "behavior_book": insight_book,  # Keep for compatibility
                         "solution": data.get("solution", ""),
                         "reflection": data.get("reflection", ""),
                     }
 
                     # Count and aggregate all skills
-                    total_skills_count += len(skill_book)
-                    for skill_name, skill_desc in skill_book.items():
+                    total_skills_count += len(insight_book)
+                    for insight_name, insight_desc in insight_book.items():
                         # Update skill store (keep latest description if duplicate)
-                        all_skills[skill_name] = skill_desc
+                        all_insights[insight_name] = insight_desc
                         # Count occurrences
-                        skill_counts[skill_name] = skill_counts.get(skill_name, 0) + 1
+                        insight_counts[insight_name] = insight_counts.get(insight_name, 0) + 1
 
                     problems.append(data.get("problem", "Unknown"))
 
-                    print(f"  Collected {len(skill_book)} skills from {filename}")
+                    print(f"  Collected insights from {filename}")
             except Exception as e:
                 print(f"  Warning: Failed to read {json_file}: {e}")
                 continue
 
         # Create aggregated skill store
-        self.skill_store = all_skills
+        self.insight_store = all_insights
 
         step_result = {
             "step": 1,
-            "name": "Collect Skill Books",
+            "name": "Collect Insight Books",
             "files_processed": len(collected_books),
             "total_skills_collected": total_skills_count,  # Total including duplicates
-            "unique_skills": len(all_skills),  # Unique skill count
-            "skill_counts": skill_counts,  # Count of each skill
+            "unique_skills": len(all_insights),  # Unique skill count
+            "insight_counts": insight_counts,  # Count of each skill
             "collected_books": collected_books,
-            "skill_store": self.skill_store,
-            "behavior_bookstore": self.skill_store,  # Keep for compatibility
+            "insight_store": self.insight_store,
+            "behavior_bookstore": self.insight_store,  # Keep for compatibility
             "problems": problems,
             "timestamp": time.time(),
         }
 
         self.aggregation_steps.append(step_result)
         print(
-            f"\nCollected {total_skills_count} total skills ({len(all_skills)} unique) from {len(collected_books)} files"
+            f"\nCollected insights ({len(all_insights)} unique) from {len(collected_books)} files"
         )
 
         return step_result
@@ -472,7 +472,7 @@ class SkillAggregationServer:
             )
 
     def _step_knowledge_graph_clustering(
-        self, skill_store: Dict, r1: float = 0.9, r2: float = 0.4
+        self, insight_store: Dict, r1: float = 0.9, r2: float = 0.4
     ) -> Dict:
         """Step 2: Build knowledge graph and cluster skills using embeddings"""
         print("Building knowledge graph with embeddings...")
@@ -481,11 +481,11 @@ class SkillAggregationServer:
         self._load_embedding_model()
 
         # Prepare skill texts for embedding
-        skill_names = list(skill_store.keys())
-        skill_texts = [f"{name}: {desc}" for name, desc in skill_store.items()]
+        insight_names = list(insight_store.keys())
+        insight_texts = [f"{name}: {desc}" for name, desc in insight_store.items()]
 
         # Compute embeddings
-        print(f"Computing embeddings for {len(skill_texts)} skills...")
+        print(f"Computing embeddings for {len(insight_texts)} skills...")
         # Use show_progress_bar based on environment - disable in non-interactive environments
         import sys
 
@@ -493,7 +493,7 @@ class SkillAggregationServer:
             sys.stdout.isatty()
         )  # Only show progress bar if running in terminal
         embeddings = self.embedding_model.encode(
-            skill_texts,
+            insight_texts,
             convert_to_numpy=True,
             show_progress_bar=show_progress,
             batch_size=32,  # Process in batches for better performance
@@ -516,8 +516,8 @@ class SkillAggregationServer:
         skill_to_group = {}  # Map skill to its same_skills group
 
         print(f"Building graph with thresholds: r1={r1} (same skill), r2={r2} (linked)")
-        for i in range(len(skill_names)):
-            for j in range(i + 1, len(skill_names)):
+        for i in range(len(insight_names)):
+            for j in range(i + 1, len(insight_names)):
                 sim = similarity_matrix[i][j]
 
                 if sim >= r1:
@@ -571,7 +571,7 @@ class SkillAggregationServer:
                             stack.append(neighbor)
             return component
 
-        for i in range(len(skill_names)):
+        for i in range(len(insight_names)):
             if i in visited:
                 continue
 
@@ -583,19 +583,19 @@ class SkillAggregationServer:
 
         # Convert to skill names
         same_skills_groups = {
-            group_id: [skill_names[i] for i in group]
+            group_id: [insight_names[i] for i in group]
             for group_id, group in same_skills.items()
         }
 
-        clusters_named = [[skill_names[i] for i in cluster] for cluster in clusters]
+        clusters_named = [[insight_names[i] for i in cluster] for cluster in clusters]
 
         print(f"Found {len(same_skills_groups)} groups of identical skills")
         print(f"Found {len(clusters_named)} clusters (connected components)")
 
         # Build GraphRAG database
         graphrag_data = self._build_graphrag_database(
-            skill_names,
-            skill_store,
+            insight_names,
+            insight_store,
             embeddings_norm,
             similarity_matrix,
             same_skills_groups,
@@ -612,7 +612,7 @@ class SkillAggregationServer:
             "clusters": clusters_named,
             "similarity_matrix": similarity_matrix.tolist(),
             "graph_edges": [
-                (skill_names[i], skill_names[j], float(sim))
+                (insight_names[i], insight_names[j], float(sim))
                 for i, j, sim in graph_edges
             ],
             "graphrag_data": graphrag_data,
@@ -624,8 +624,8 @@ class SkillAggregationServer:
 
     def _build_graphrag_database(
         self,
-        skill_names: List[str],
-        skill_store: Dict,
+        insight_names: List[str],
+        insight_store: Dict,
         embeddings: np.ndarray,
         similarity_matrix: np.ndarray,
         same_skills_groups: Dict,
@@ -645,22 +645,22 @@ class SkillAggregationServer:
 
         # Add nodes (skills)
         nodes = {}
-        for idx, skill_name in enumerate(skill_names):
+        for idx, insight_name in enumerate(insight_names):
             node_data = {
-                "skill_name": skill_name,
-                "description": skill_store[skill_name],
+                "insight_name": insight_name,
+                "description": insight_store[insight_name],
                 "embedding": embeddings[idx].tolist(),  # Store normalized embedding
                 "index": idx,
             }
-            nodes[skill_name] = node_data
+            nodes[insight_name] = node_data
             if G is not None:
-                G.add_node(skill_name, **node_data)
+                G.add_node(insight_name, **node_data)
 
         # Add edges based on similarity
         edges = []
         for i, j, sim in graph_edges:
-            skill_i = skill_names[i]
-            skill_j = skill_names[j]
+            skill_i = insight_names[i]
+            skill_j = insight_names[j]
             edge_type = "same" if sim >= r1 else "linked"
             edge_data = {
                 "similarity": float(sim),
@@ -672,23 +672,23 @@ class SkillAggregationServer:
 
         # Store same skills groups as node attributes
         for group_id, group_skills in same_skills_groups.items():
-            for skill_name in group_skills:
-                if skill_name in nodes:
-                    nodes[skill_name]["same_skills_group"] = group_id
+            for insight_name in group_skills:
+                if insight_name in nodes:
+                    nodes[insight_name]["same_skills_group"] = group_id
                     if G is not None:
-                        G.nodes[skill_name]["same_skills_group"] = group_id
+                        G.nodes[insight_name]["same_skills_group"] = group_id
 
         # Store cluster information
         for cluster_id, cluster_skills in enumerate(clusters):
-            for skill_name in cluster_skills:
-                if skill_name in nodes:
-                    if "clusters" not in nodes[skill_name]:
-                        nodes[skill_name]["clusters"] = []
-                    nodes[skill_name]["clusters"].append(cluster_id)
+            for insight_name in cluster_skills:
+                if insight_name in nodes:
+                    if "clusters" not in nodes[insight_name]:
+                        nodes[insight_name]["clusters"] = []
+                    nodes[insight_name]["clusters"].append(cluster_id)
                     if G is not None:
-                        if "clusters" not in G.nodes[skill_name]:
-                            G.nodes[skill_name]["clusters"] = []
-                        G.nodes[skill_name]["clusters"].append(cluster_id)
+                        if "clusters" not in G.nodes[insight_name]:
+                            G.nodes[insight_name]["clusters"] = []
+                        G.nodes[insight_name]["clusters"].append(cluster_id)
 
         graphrag_data = {
             "nodes": nodes,
@@ -708,7 +708,7 @@ class SkillAggregationServer:
         self,
         same_skills_groups: Dict,
         clusters: List[List[str]],
-        skill_store: Dict,
+        insight_store: Dict,
         existing_encyclopedia: str = "",
         r1: float = 0.9,
         r2: float = 0.4,
@@ -716,11 +716,11 @@ class SkillAggregationServer:
         """Get the prompt for merging same skills and summarizing clusters"""
         # Format same skills groups
         same_skills_text = ""
-        for group_id, skill_names in same_skills_groups.items():
+        for group_id, insight_names in same_skills_groups.items():
             same_skills_text += f"\nGroup {group_id} (merge these into one skill):\n"
-            for skill_name in skill_names:
+            for insight_name in insight_names:
                 same_skills_text += (
-                    f"  - {skill_name}: {skill_store.get(skill_name, 'N/A')}\n"
+                    f"  - {insight_name}: {insight_store.get(insight_name, 'N/A')}\n"
                 )
 
         # Format clusters
@@ -728,24 +728,24 @@ class SkillAggregationServer:
         for cluster_id, cluster_skills in enumerate(clusters):
             clusters_text += f"\nCluster {cluster_id}:\n"
             clusters_text += "  Skills in this cluster:\n"
-            for skill_name in cluster_skills:
+            for insight_name in cluster_skills:
                 clusters_text += (
-                    f"    - {skill_name}: {skill_store.get(skill_name, 'N/A')}\n"
+                    f"    - {insight_name}: {insight_store.get(insight_name, 'N/A')}\n"
                 )
 
         # Get all unique skills (not in same_skills_groups)
-        all_skill_names = set(skill_store.keys())
-        merged_skill_names = set()
+        all_insight_names = set(insight_store.keys())
+        merged_insight_names = set()
         for group in same_skills_groups.values():
-            merged_skill_names.update(group)
-        standalone_skills = all_skill_names - merged_skill_names
+            merged_insight_names.update(group)
+        standalone_skills = all_insight_names - merged_insight_names
 
         standalone_text = ""
         if standalone_skills:
             standalone_text = "\nStandalone Skills (keep as-is):\n"
-            for skill_name in standalone_skills:
+            for insight_name in standalone_skills:
                 standalone_text += (
-                    f"  - {skill_name}: {skill_store.get(skill_name, 'N/A')}\n"
+                    f"  - {insight_name}: {insight_store.get(insight_name, 'N/A')}\n"
                 )
 
         # Format existing encyclopedia section
@@ -800,7 +800,7 @@ TASK: Merge Same Skills and Summarize Clusters
 ### Clusters (SUMMARIZE these, but keep skills separate):
 {clusters_text}
 
-**IMPORTANT**: For each cluster above, you MUST include ALL skills from that cluster in the "skills" array. Each skill should have "skill_name" and "description" fields. Do NOT omit the skills array - it is REQUIRED.
+**IMPORTANT**: For each cluster above, you MUST include ALL skills from that cluster in the "skills" array. Each skill should have "insight_name" and "description" fields. Do NOT omit the skills array - it is REQUIRED.
 
 ### Standalone Skills:
 {standalone_text}
@@ -813,7 +813,7 @@ Output ONLY a JSON object with this structure:
   "title": "Problem-Solving Skills Encyclopedia",
   "merged_skills": [
     {{
-      "skill_name": "...",
+      "insight_name": "...",
       "description": "...",
       "merged_from": ["skill1", "skill2", ...]
     }}
@@ -825,11 +825,11 @@ Output ONLY a JSON object with this structure:
       "use_cases": ["...", "..."],
       "skills": [
         {{
-          "skill_name": "...",
+          "insight_name": "...",
           "description": "..."
         }},
         {{
-          "skill_name": "...",
+          "insight_name": "...",
           "description": "..."
         }}
       ],
@@ -838,7 +838,7 @@ Output ONLY a JSON object with this structure:
   ],
   "standalone_skills": [
     {{
-      "skill_name": "...",
+      "insight_name": "...",
       "description": "..."
     }}
   ]
@@ -848,7 +848,7 @@ Output ONLY a JSON object with this structure:
 **CRITICAL REQUIREMENTS**:
 1. Every cluster MUST have a "skills" array containing ALL skills from that cluster
 2. The "skills" array cannot be empty - it must contain at least one skill object
-3. Each skill in the "skills" array must have both "skill_name" and "description" fields
+3. Each skill in the "skills" array must have both "insight_name" and "description" fields
 4. Do NOT omit the "skills" array from any cluster - it is REQUIRED
 
 Output ONLY the JSON object, nothing else.
@@ -903,14 +903,14 @@ Output ONLY the JSON object, nothing else.
         self,
         same_skills_groups: Dict,
         clusters: List[List[str]],
-        skill_store: Dict,
+        insight_store: Dict,
         existing_encyclopedia: str = "",
         r1: float = 0.9,
         r2: float = 0.4,
     ) -> Dict:
         """Step 3: Merge same skills and summarize clusters"""
         prompt = self._get_cluster_summary_prompt(
-            same_skills_groups, clusters, skill_store, existing_encyclopedia, r1, r2
+            same_skills_groups, clusters, insight_store, existing_encyclopedia, r1, r2
         )
 
         system_prompt = None
@@ -992,14 +992,14 @@ Output ONLY the JSON object, nothing else.
         Returns:
             Dictionary containing all aggregation steps and final encyclopedia.
         """
-        # Step 1: Collect Skill Books (append all skills together)
+        # Step 1: Collect Insight Books (append all skills together)
         print("\n" + "=" * 80)
         print("STEP 1: Collecting Skill Books")
         print("=" * 80)
-        collection_result = self.collect_skill_books(json_files)
+        collection_result = self.collect_insight_books(json_files)
         time.sleep(1)
 
-        if not self.skill_store:
+        if not self.insight_store:
             files_processed = collection_result.get("files_processed", 0)
             print(f"Warning: No skills found in {files_processed} collected files!")
             return {
@@ -1015,7 +1015,7 @@ Output ONLY the JSON object, nothing else.
         print(f"Using thresholds: r1={r1} (same skill), r2={r2} (linked)")
         print("=" * 80)
         clustering_result = self._step_knowledge_graph_clustering(
-            self.skill_store, r1=r1, r2=r2
+            self.insight_store, r1=r1, r2=r2
         )
         same_skills_groups = clustering_result["same_skills_groups"]
         clusters = clustering_result["clusters"]
@@ -1038,7 +1038,7 @@ Output ONLY the JSON object, nothing else.
         self._step_cluster_summary(
             same_skills_groups,
             clusters,
-            self.skill_store,
+            self.insight_store,
             existing_encyclopedia,
             r1=r1,
             r2=r2,
@@ -1046,8 +1046,8 @@ Output ONLY the JSON object, nothing else.
 
         # Compile results
         result = {
-            "skill_store": self.skill_store,
-            "behavior_bookstore": self.skill_store,  # Keep for compatibility
+            "insight_store": self.insight_store,
+            "behavior_bookstore": self.insight_store,  # Keep for compatibility
             "collection_metadata": {
                 "files_processed": collection_result.get("files_processed", 0),
                 "total_skills_collected": collection_result.get(
@@ -1063,8 +1063,8 @@ Output ONLY the JSON object, nothing else.
             },
             "encyclopedia": self.encyclopedia,  # Final encyclopedia containing aggregated skills
             "aggregation_steps": self.aggregation_steps,
-            "total_skills": len(self.skill_store),
-            "total_behaviors": len(self.skill_store),  # Keep for compatibility
+            "total_skills": len(self.insight_store),
+            "total_behaviors": len(self.insight_store),  # Keep for compatibility
             "total_steps": len(self.aggregation_steps),
         }
 
