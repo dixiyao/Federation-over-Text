@@ -1,5 +1,7 @@
 """
-Scraper for ICLR 2023 Notable Top 5% Papers from OpenReview
+Scraper for ICLR papers from OpenReview.
+- Supports ICLR notable lists (Top 5%, Top 25%, Poster) and accepted tracks (Oral, Spotlight, Poster).
+- Year can be specified; defaults to 2023 for notable lists or 2024 when using accept flags.
 Downloads PDFs and metadata for papers from the OpenReview website.
 """
 
@@ -15,8 +17,9 @@ from bs4 import BeautifulSoup
 
 
 class OpenReviewScraper:
-    def __init__(self, output_dir="data/papers/iclr23_top5"):
+    def __init__(self, output_dir="data/papers/iclr23_top5", year=2023):
         self.output_dir = output_dir
+        self.year = year
         self.base_url = "https://openreview.net"
         self.session = requests.Session()
         self.session.headers.update(
@@ -43,7 +46,7 @@ class OpenReviewScraper:
         papers = []
         api_url = "https://api.openreview.net/notes"
 
-        # Search across all ICLR 2023 submissions
+        # Search across all ICLR submissions for the configured year
         # Use pagination to get all results
         offset = 0
         limit = 1000
@@ -53,12 +56,14 @@ class OpenReviewScraper:
         print(
             f"Searching for papers with '{title_filter}' in title (case-insensitive)..."
         )
-        print("This may take a while as we search through all ICLR 2023 submissions...")
+        print(
+            f"This may take a while as we search through all ICLR {self.year} submissions..."
+        )
 
         while True:
             try:
                 params = {
-                    "invitation": "ICLR.cc/2023/Conference/-/Blind_Submission",
+                    "invitation": f"ICLR.cc/{self.year}/Conference/-/Blind_Submission",
                     "details": "replyCount,invitation,original",
                     "offset": offset,
                     "limit": limit,
@@ -125,9 +130,18 @@ class OpenReviewScraper:
         )
         return papers
 
-    def get_paper_list(self, title_filter=None, top5=False, top25=False, poster=False):
+    def get_paper_list(
+        self,
+        title_filter=None,
+        top5=False,
+        top25=False,
+        poster=False,
+        accept_oral=False,
+        accept_spotlight=False,
+        accept_poster=False,
+    ):
         """
-        Fetch the list of papers from ICLR 2023
+        Fetch the list of papers from ICLR notable lists or accepted tracks for the configured year
 
         Args:
             title_filter (str, optional): Filter papers by keyword in title (case-insensitive).
@@ -135,7 +149,21 @@ class OpenReviewScraper:
             top5 (bool): If True, only get notable top 5% papers
             top25 (bool): If True, only get notable top 25% papers
             poster (bool): If True, only get poster papers
+            accept_oral (bool): If True, scrape Accept (Oral) tab
+            accept_spotlight (bool): If True, scrape Accept (Spotlight) tab
+            accept_poster (bool): If True, scrape Accept (Poster) tab
         """
+        # If using accepted tabs, go straight to web scraping (API invitation differs)
+        if accept_oral or accept_spotlight or accept_poster:
+            return self._scrape_web_page(
+                title_filter=title_filter,
+                top5=top5,
+                top25=top25,
+                poster=poster,
+                accept_oral=accept_oral,
+                accept_spotlight=accept_spotlight,
+                accept_poster=accept_poster,
+            )
         # If title filter is provided, use search API to get ALL matching papers
         if title_filter:
             papers = self._search_papers_by_title(title_filter)
@@ -144,7 +172,13 @@ class OpenReviewScraper:
             # If search API doesn't work, fall back to web scraping
             print("Search API didn't return results, trying web scraping...")
             return self._scrape_web_page(
-                title_filter=title_filter, top5=top5, top25=top25, poster=poster
+                title_filter=title_filter,
+                top5=top5,
+                top25=top25,
+                poster=poster,
+                accept_oral=accept_oral,
+                accept_spotlight=accept_spotlight,
+                accept_poster=accept_poster,
             )
 
         # If no title filter, use the original method
@@ -161,7 +195,7 @@ class OpenReviewScraper:
             print("Fetching papers from OpenReview API (this may take a while)...")
             while offset < max_papers_to_fetch:
                 params = {
-                    "invitation": "ICLR.cc/2023/Conference/-/Blind_Submission",
+                    "invitation": f"ICLR.cc/{self.year}/Conference/-/Blind_Submission",
                     "details": "replyCount,invitation,original",
                     "offset": offset,
                     "limit": limit,
@@ -202,7 +236,7 @@ class OpenReviewScraper:
                         or "notable top 25%" in venue.lower()
                     ):
                         should_include = True
-                    elif poster and ("Poster" in venue or "ICLR 2023" in venue):
+                    elif poster and ("Poster" in venue or f"ICLR {self.year}" in venue):
                         should_include = True
                     elif not top5 and not top25 and not poster:
                         # Default: get notable top 5%
@@ -232,19 +266,38 @@ class OpenReviewScraper:
             print(f"API method failed: {e}")
             print("Trying web scraping method...")
             papers = self._scrape_web_page(
-                title_filter=title_filter, top5=top5, top25=top25, poster=poster
+                title_filter=title_filter,
+                top5=top5,
+                top25=top25,
+                poster=poster,
+                accept_oral=accept_oral,
+                accept_spotlight=accept_spotlight,
+                accept_poster=accept_poster,
             )
         except Exception as e:
             print(f"Unexpected error in API call: {e}")
             print("Trying web scraping method...")
             papers = self._scrape_web_page(
-                title_filter=title_filter, top5=top5, top25=top25, poster=poster
+                title_filter=title_filter,
+                top5=top5,
+                top25=top25,
+                poster=poster,
+                accept_oral=accept_oral,
+                accept_spotlight=accept_spotlight,
+                accept_poster=accept_poster,
             )
 
         return papers
 
     def _scrape_web_page(
-        self, title_filter=None, top5=False, top25=False, poster=False
+        self,
+        title_filter=None,
+        top5=False,
+        top25=False,
+        poster=False,
+        accept_oral=False,
+        accept_spotlight=False,
+        accept_poster=False,
     ):
         """
         Fallback method: scrape papers from multiple web pages
@@ -254,31 +307,57 @@ class OpenReviewScraper:
             top5 (bool): If True, scrape from notable top 5% papers
             top25 (bool): If True, scrape from notable top 25% papers
             poster (bool): If True, scrape from poster papers
+            accept_oral (bool): If True, scrape Accept (Oral)
+            accept_spotlight (bool): If True, scrape Accept (Spotlight)
+            accept_poster (bool): If True, scrape Accept (Poster)
         """
-        # Build list of URLs based on flags
-        # If no flags are set, use all URLs (backward compatibility)
+        # Build list of URLs based on flags and configured year
+        # If no flags are set, use all notable URLs (backward compatibility)
         urls = []
-        if top5 or (not top5 and not top25 and not poster):
-            urls.append(
-                (
-                    "Notable Top 5%",
-                    "https://openreview.net/group?id=ICLR.cc/2023/Conference#notable-top-5-",
+        if accept_oral or accept_spotlight or accept_poster:
+            if accept_oral:
+                urls.append(
+                    (
+                        f"ICLR {self.year} Accept (Oral)",
+                        f"https://openreview.net/group?id=ICLR.cc/{self.year}/Conference#tab-accept-oral",
+                    )
                 )
-            )
-        if top25 or (not top5 and not top25 and not poster):
-            urls.append(
-                (
-                    "Notable Top 25%",
-                    "https://openreview.net/group?id=ICLR.cc%2F2023%2FConference#notable-top-25-",
+            if accept_spotlight:
+                urls.append(
+                    (
+                        f"ICLR {self.year} Accept (Spotlight)",
+                        f"https://openreview.net/group?id=ICLR.cc/{self.year}/Conference#tab-accept-spotlight",
+                    )
                 )
-            )
-        if poster or (not top5 and not top25 and not poster):
-            urls.append(
-                (
-                    "Poster",
-                    "https://openreview.net/group?id=ICLR.cc%2F2023%2FConference#poster",
+            if accept_poster:
+                urls.append(
+                    (
+                        f"ICLR {self.year} Accept (Poster)",
+                        f"https://openreview.net/group?id=ICLR.cc/{self.year}/Conference#tab-accept-poster",
+                    )
                 )
-            )
+        else:
+            if top5 or (not top5 and not top25 and not poster):
+                urls.append(
+                    (
+                        "Notable Top 5%",
+                        f"https://openreview.net/group?id=ICLR.cc/{self.year}/Conference#notable-top-5-",
+                    )
+                )
+            if top25 or (not top5 and not top25 and not poster):
+                urls.append(
+                    (
+                        "Notable Top 25%",
+                        f"https://openreview.net/group?id=ICLR.cc%2F{self.year}%2FConference#notable-top-25-",
+                    )
+                )
+            if poster or (not top5 and not top25 and not poster):
+                urls.append(
+                    (
+                        "Poster",
+                        f"https://openreview.net/group?id=ICLR.cc%2F{self.year}%2FConference#poster",
+                    )
+                )
 
         all_papers = []
         seen_paper_ids = set()  # Track seen papers to avoid duplicates
@@ -493,7 +572,15 @@ class OpenReviewScraper:
         print(f"Saved metadata to {metadata_path}")
 
     def scrape_all(
-        self, max_papers=None, title_filter=None, top5=False, top25=False, poster=False
+        self,
+        max_papers=None,
+        title_filter=None,
+        top5=False,
+        top25=False,
+        poster=False,
+        accept_oral=False,
+        accept_spotlight=False,
+        accept_poster=False,
     ):
         """
         Main method to scrape papers from OpenReview
@@ -506,6 +593,9 @@ class OpenReviewScraper:
             top5 (bool): If True, scrape from notable top 5% papers
             top25 (bool): If True, scrape from notable top 25% papers
             poster (bool): If True, scrape from poster papers
+            accept_oral (bool): If True, scrape Accept (Oral)
+            accept_spotlight (bool): If True, scrape Accept (Spotlight)
+            accept_poster (bool): If True, scrape Accept (Poster)
         """
         print("Fetching paper list...")
         if title_filter:
@@ -515,14 +605,26 @@ class OpenReviewScraper:
 
         # Try API first, then fall back to web scraping with specified flags
         papers = self.get_paper_list(
-            title_filter=title_filter, top5=top5, top25=top25, poster=poster
+            title_filter=title_filter,
+            top5=top5,
+            top25=top25,
+            poster=poster,
+            accept_oral=accept_oral,
+            accept_spotlight=accept_spotlight,
+            accept_poster=accept_poster,
         )
 
         # If API doesn't work or returns no papers, try web scraping
         if not papers:
             print("No papers from API, trying web scraping...")
             papers = self._scrape_web_page(
-                title_filter=title_filter, top5=top5, top25=top25, poster=poster
+                title_filter=title_filter,
+                top5=top5,
+                top25=top25,
+                poster=poster,
+                accept_oral=accept_oral,
+                accept_spotlight=accept_spotlight,
+                accept_poster=accept_poster,
             )
 
         if not papers:
@@ -557,7 +659,7 @@ class OpenReviewScraper:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Scrape ICLR 2023 Notable Top 5% Papers from OpenReview"
+        description="Scrape ICLR papers from OpenReview (notable lists or accepted tracks, configurable year)"
     )
     parser.add_argument(
         "-n",
@@ -581,6 +683,12 @@ if __name__ == "__main__":
         help="Filter papers by keyword in title (case-insensitive). Example: -f 'diffusion'",
     )
     parser.add_argument(
+        "--year",
+        type=int,
+        default=None,
+        help="ICLR conference year (default: 2023 for notable lists or 2024 when using accept flags)",
+    )
+    parser.add_argument(
         "--top5",
         action="store_true",
         help="Scrape from notable top 5% papers",
@@ -596,13 +704,36 @@ if __name__ == "__main__":
         help="Scrape from poster papers",
     )
 
+    parser.add_argument(
+        "--accept-oral",
+        action="store_true",
+        help="Scrape ICLR Accept (Oral) for the selected year",
+    )
+    parser.add_argument(
+        "--accept-spotlight",
+        action="store_true",
+        help="Scrape ICLR Accept (Spotlight) for the selected year",
+    )
+    parser.add_argument(
+        "--accept-poster",
+        action="store_true",
+        help="Scrape ICLR Accept (Poster) for the selected year",
+    )
+
     args = parser.parse_args()
 
-    scraper = OpenReviewScraper(output_dir=args.output_dir)
+    accept_mode = args.accept_oral or args.accept_spotlight or args.accept_poster
+    default_year = 2024 if accept_mode else 2023
+    effective_year = args.year if args.year is not None else default_year
+
+    scraper = OpenReviewScraper(output_dir=args.output_dir, year=effective_year)
     scraper.scrape_all(
         max_papers=args.num_papers,
         title_filter=args.filter,
         top5=args.top5,
         top25=args.top25,
         poster=args.poster,
+        accept_oral=args.accept_oral,
+        accept_spotlight=args.accept_spotlight,
+        accept_poster=args.accept_poster,
     )
