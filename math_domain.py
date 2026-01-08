@@ -200,8 +200,27 @@ class MathDomainPipeline:
                 "statement",
                 "text",
             ]
-            answer_cols = ["answer", "solution", "final_answer", "answer_text"]
-            id_cols = ["id", "problem_id", "num", "number", "idx"]
+            # Note: For gradingbench, "response" is the student answer being graded
+            # For answerbench/proofbench, "short answer" or "solution" is the correct answer
+            answer_cols = [
+                "answer",
+                "solution", 
+                "final_answer",
+                "answer_text",
+                "short answer",
+                "short_answer",
+                "response"  # For gradingbench
+            ]
+            id_cols = [
+                "id",
+                "problem_id",
+                "problem id",
+                "grading_id",
+                "grading id",
+                "num",
+                "number",
+                "idx"
+            ]
 
             problem_col = None
             answer_col = None
@@ -618,6 +637,7 @@ class MathDomainPipeline:
         max_problems: Optional[int],
         r1: float = 0.95,
         r2: float = 0.4,
+        start_from_step: int = 1,
     ) -> Dict:
         """Run iterative learning pipeline.
 
@@ -632,6 +652,7 @@ class MathDomainPipeline:
             max_problems: Max problems per dataset
             r1: Similarity threshold for aggregation
             r2: Similarity threshold for aggregation
+            start_from_step: Start from step 1 (extract) or 2 (aggregate only)
 
         Returns:
             Summary dict with iteration history
@@ -655,16 +676,32 @@ class MathDomainPipeline:
             print(f"{'='*80}")
 
             # STEP 1: Extract insights (and solve if encyclopedia exists)
-            insights_map, results = self.learn_insights_from_datasets(
-                dataset_list, max_problems, encyclopedia_path, iteration
-            )
+            if start_from_step == 1:
+                insights_map, results = self.learn_insights_from_datasets(
+                    dataset_list, max_problems, encyclopedia_path, iteration
+                )
 
-            # Calculate accuracy for this iteration
-            accuracy = 0.0
-            num_correct = 0
-            if results:
-                num_correct = sum(1 for r in results if r["is_correct"])
-                accuracy = num_correct / len(results)
+                # Calculate accuracy for this iteration
+                accuracy = 0.0
+                num_correct = 0
+                if results:
+                    num_correct = sum(1 for r in results if r["is_correct"])
+                    accuracy = num_correct / len(results)
+            else:
+                # Starting from step 2: check if insights exist from previous run
+                print(f"\nSkipping Step 1 (insight extraction) - assuming insights already exist")
+                insights_exist = all(
+                    os.path.isdir(os.path.join(self.output_dir, name))
+                    for name in dataset_list
+                )
+                if not insights_exist:
+                    raise FileNotFoundError(
+                        f"Cannot start from step 2: Insight directories not found in {self.output_dir}. "
+                        "Run with --start-from-step 1 first to extract insights."
+                    )
+                results = []
+                accuracy = 0.0
+                num_correct = 0
 
             # STEP 2: Aggregate insights into encyclopedia
             print(f"\nIteration {iteration}: Aggregating insights...")
@@ -900,6 +937,13 @@ def main():
         default=3,
         help="Number of iterations (default: 3)",
     )
+    parser.add_argument(
+        "--start-from-step",
+        type=int,
+        default=1,
+        choices=[1, 2],
+        help="Start from step: 1=extract insights (default), 2=aggregate only (assumes insights already exist)",
+    )
 
     args = parser.parse_args()
 
@@ -935,6 +979,7 @@ def main():
             max_problems=args.max_problems,
             r1=args.r1,
             r2=args.r2,
+            start_from_step=args.start_from_step,
         )
     except Exception as exc:  # noqa: BLE001
         print(f"Error: {exc}")
