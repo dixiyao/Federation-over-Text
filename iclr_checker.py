@@ -199,7 +199,11 @@ def fetch_accept_tracks(
             
             if decisions:
                 print(f"Found {len(decisions)} accepted papers via client")
-                return _hydrate_papers_from_client(client, decisions)
+                hydrated = _hydrate_papers_from_client(client, decisions)
+                # Sort by track priority: oral > spotlight > poster
+                track_order = {'oral': 0, 'spotlight': 1, 'poster': 2}
+                hydrated.sort(key=lambda p: track_order.get(p.get('track', ''), 999))
+                return hydrated
             else:
                 print("No accepted papers found via client")
                 return []
@@ -210,6 +214,47 @@ def fetch_accept_tracks(
     # Fallback: old requests-based approach
     print("Using requests-based fallback (may not work for ICLR 2024+)...")
     return []
+
+
+def _fetch_paper_content(forum_id: str, session: requests.Session = None) -> str:
+    """Fetch full paper content from OpenReview forum page or PDF.
+    
+    Returns paper text content or empty string if unavailable.
+    """
+    if session is None:
+        session = requests.Session()
+        session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+        })
+    
+    try:
+        # Try to get paper content from forum page
+        url = f"https://openreview.net/forum?id={forum_id}"
+        resp = session.get(url, timeout=30)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.content, "html.parser")
+        
+        # Look for paper content sections
+        content_parts = []
+        
+        # Try to find main paper content divs
+        for content_div in soup.find_all(['div', 'section'], class_=re.compile('note-content|paper-content', re.I)):
+            text = content_div.get_text(separator=' ', strip=True)
+            if text and len(text) > 100:  # Meaningful content
+                content_parts.append(text)
+        
+        if content_parts:
+            return ' '.join(content_parts)[:50000]  # Limit to ~50k chars to avoid token limits
+        
+        # Fallback: try to get any substantial text from page
+        page_text = soup.get_text(separator=' ', strip=True)
+        if len(page_text) > 1000:
+            return page_text[:50000]
+        
+        return ""
+    except Exception as e:
+        print(f"    Warning: Could not fetch paper content for {forum_id}: {e}")
+        return ""
 
 
 def _hydrate_papers_from_client(client, forums: List[Dict]) -> List[Dict]:
@@ -423,25 +468,29 @@ def score_paper(
     skills_prompt: str,
     paper: Dict,
 ) -> Dict:
-    """Ask Gemini which skills guide the paper."""
+    """Ask Gemini which skills guide the paper's solutions."""
     title = paper.get("title", "")
     abstract = paper.get("abstract", "")
+    content = paper.get("content", "")
+    
+    paper_text = f"Title: {title}\n\nAbstract: {abstract}\n\nFull Paper Content: {content}"
 
     prompt = f"""
-You are checking whether a research paper is guided by any skills from an encyclopedia.
+You are evaluating whether a research paper's proposed solutions are guided by or directly derived from skills in an encyclopedia.
 
-Skills:
+Skills (Insights/Methods):
 {skills_prompt}
 
-Paper:
-- Title: {title}
-- Abstract: {abstract}
+Research Paper:
+{paper_text}
 
 Instructions:
-- Identify which skills clearly apply based on title and abstract.
-- Respond ONLY in JSON with keys: guided (boolean), matched_skills (array of skill names).
-- Set guided=true when at least one skill is relevant.
-- Use only skill names provided in the Skills list.
+- Determine if the paper's core ideas, methods, or solutions are guided by or directly follow from any of the skills.
+- A skill "guides" the paper if: (1) the proposed solution is derived from or follows the skill's methodology, OR (2) a researcher with knowledge of the skill could develop the paper's core contributions.
+- Do NOT mark as guided if the skill merely relates to the problem domain but doesn't guide the solution approach.
+- Respond ONLY in valid JSON with keys: guided (boolean), matched_skills (array of skill names).
+- Set guided=true ONLY when at least one skill demonstrably guides the paper's solutions.
+- Use only exact skill names from the Skills list above.
 """
     raw = call_gemini(model, prompt)
     try:
@@ -534,42 +583,67 @@ def main():
         accept_poster=args.accept_poster,
     )
     if not papers:
-        print("No Accept (Oral) papers found.")
+        print("No Accept papers found.")
         return
 
+    # Already sorted by track (oral > spotlight > poster)
+    print(f"\nProcessing {len(papers)} papers (sorted: oral → spotlight → poster)...\n")
+    
     results = []
-    guided_count = 0
+    track_stats = {'oral': {'total': 0, 'guided': 0}, 
+                   'spotlight': {'total': 0, 'guided': 0}, 
+                   'poster': {'total': 0, 'guided': 0}}
+    
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+    })
 
     for idx, paper in enumerate(papers, 1):
         track_label = paper.get("track", "")
-        print(
-            f"[{idx}/{len(papers)}] Checking ({track_label}): {paper.get('title', '')[:80]}"
-        )
+        forum_id = paper.get("forum") or paper.get("id")
+        
+        print(f"[{idx}/{len(papers)}] Processing ({track_label}): {paper.get('title', '')[:80]}")
+        
+        # Fetch full paper content
+        print(f"  Fetching paper content...")
+        paper_content = _fetch_paper_content(forum_id, session)
+        paper["content"] = paper_content
+        if paper_content:
+            print(f"  Retrieved {len(paper_content)} characters")
+        else:
+            print(f"  No full content available, using title/abstract only")
+        
+        time.sleep(1)  # Rate limit between fetches
+        
+        # Score with Gemini
+        print(f"  Evaluating with Gemini...")
         try:
             verdict = score_paper(model, skills_prompt, paper)
             guided = bool(verdict.get("guided"))
             matched = verdict.get("matched_skills") or []
+            print(f"  Result: {'✓ GUIDED' if guided else '✗ Not guided'} | Skills: {len(matched)}")
         except Exception as exc:
             print(f"  Gemini error: {exc}")
             guided = False
             matched = []
-            verdict = {"guided": guided, "matched_skills": matched}
+        
+        # Update statistics
+        if track_label in track_stats:
+            track_stats[track_label]['total'] += 1
+            if guided:
+                track_stats[track_label]['guided'] += 1
 
-        if guided:
-            guided_count += 1
-
-        results.append(
-            {
-                "id": paper.get("id"),
-                "forum": paper.get("forum"),
-                "title": paper.get("title", ""),
-                "guided": guided,
-                "matched_skills": matched,
-                "track": paper.get("track", ""),
-                "venue": paper.get("venue", ""),
-                "venueid": paper.get("venueid", ""),
-            }
-        )
+        results.append({
+            "id": paper.get("id"),
+            "forum": paper.get("forum"),
+            "title": paper.get("title", ""),
+            "guided": guided,
+            "matched_skills": matched,
+            "track": paper.get("track", ""),
+            "venue": paper.get("venue", ""),
+            "venueid": paper.get("venueid", ""),
+        })
 
         time.sleep(max(args.sleep, 0))
 
@@ -577,9 +651,22 @@ def main():
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
 
+    # Print overall and per-track statistics
     total = len(papers)
-    print(f"\nGuided papers: {guided_count} out of {total}")
-    print(f"Results saved to {args.output}")
+    total_guided = sum(track_stats[t]['guided'] for t in track_stats)
+    
+    print(f"\n{'='*80}")
+    print(f"RESULTS SUMMARY")
+    print(f"{'='*80}")
+    print(f"\nOverall: {total_guided}/{total} papers guided ({total_guided/total*100:.1f}%)\n")
+    
+    for track in ['oral', 'spotlight', 'poster']:
+        stats = track_stats[track]
+        if stats['total'] > 0:
+            pct = stats['guided'] / stats['total'] * 100
+            print(f"  {track.capitalize():10s}: {stats['guided']}/{stats['total']} guided ({pct:.1f}%)")
+    
+    print(f"\nResults saved to {args.output}")
 
 
 if __name__ == "__main__":
