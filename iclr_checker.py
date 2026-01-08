@@ -484,13 +484,18 @@ Skills (Insights/Methods):
 Research Paper:
 {paper_text}
 
-Instructions:
-- Determine if the paper's core ideas, methods, or solutions are guided by or directly follow from any of the skills.
-- A skill "guides" the paper if: (1) the proposed solution is derived from or follows the skill's methodology, OR (2) a researcher with knowledge of the skill could develop the paper's core contributions.
-- Do NOT mark as guided if the skill merely relates to the problem domain but doesn't guide the solution approach.
-- Respond ONLY in valid JSON with keys: guided (boolean), matched_skills (array of skill names).
-- Set guided=true ONLY when at least one skill demonstrably guides the paper's solutions.
-- Use only exact skill names from the Skills list above.
+Evaluation Criteria - A skill guides the paper ONLY IF ALL of the following are true:
+
+1. CONCRETE METHODOLOGY USAGE: The skill's methodology or approach is concretely used in the paper's methods/approach section, not just theoretically relevant or mentioned in motivation.
+
+2. METHODS SECTION PRESENCE: The skill must be related to how the paper actually implements its solution (methods, algorithms, techniques), not just in problem statement or related work.
+
+3. COUNTERFACTUAL TEST: The paper's core contribution would fundamentally differ or fail without this skill. Ask: "If the authors didn't know this skill, could they still arrive at the same core solution?"
+
+Response Format:
+- Respond ONLY in valid JSON with keys: guided (boolean), matched_skills (array of skill names)
+- Set guided=true ONLY when at least one skill passes ALL criteria above
+- Use only exact skill names from the Skills list above
 """
     raw = call_gemini(model, prompt)
     try:
